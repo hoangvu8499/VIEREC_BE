@@ -1,0 +1,21 @@
+# In-memory database so tests need no infrastructure.
+spring:
+  datasource:
+    url: jdbc:h2:mem:vierec;DB_CLOSE_DELAY=-1;MODE=MySQL;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ''
+  jpa:
+    hibernate:
+      # Only the in-memory H2 test database is generated from the entities; real databases are never touched.
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+
+app:
+  seed-admin: false
+  jwt:
+    secret: test-secret-key-for-unit-tests-only-32chars
+  upload:
+    dir: target/test-uploads

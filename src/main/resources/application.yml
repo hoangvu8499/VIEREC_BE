@@ -1,0 +1,127 @@
+# =====================================================================
+# Base configuration. Environment-specific overrides live in
+# application-{dev,prod}.yml; pick one with SPRING_PROFILES_ACTIVE.
+# =====================================================================
+spring:
+  application:
+    name: VIEREC_BE
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/vierec?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Ho_Chi_Minh&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: vierec-pool
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    open-in-view: false        # fail loudly on lazy loading outside a transaction
+    hibernate:
+      ddl-auto: validate       # schema is managed by hand (DB.sql); Hibernate must never change it
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        jdbc:
+          batch_size: 50
+          time_zone: Asia/Ho_Chi_Minh
+        order_inserts: true
+        order_updates: true
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+      fail-on-empty-beans: false
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: Asia/Ho_Chi_Minh
+
+  mvc:
+    throw-exception-if-no-handler-found: true
+  web:
+    resources:
+      add-mappings: false      # required for the 404 above to reach the handler
+
+  servlet:
+    multipart:
+      # Hard ceiling checked by the container; per-type limits are app.upload.max-*-size.
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:500MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:600MB}
+
+server:
+  port: ${SERVER_PORT:8383}
+  shutdown: graceful
+  error:
+    include-message: never
+    include-stacktrace: never
+  compression:
+    enabled: true
+  servlet:
+    context-path: /
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+# ---------------------------------------------------------------- app
+app:
+  info:
+    version: 1.0.0
+  jwt:
+    # Override in every real environment. Must be >= 32 chars for HS256.
+    secret: ${JWT_SECRET:change-me-this-is-a-dev-only-secret-key-32b}
+    access-token-validity-ms: ${JWT_ACCESS_TTL:1800000}        # 30 minutes
+    refresh-token-validity-ms: ${JWT_REFRESH_TTL:2592000000}   # 30 days
+    issuer: vierec-be
+  cookie:
+    # Tokens travel only in HttpOnly cookies, never in a response body.
+    access-token-name: access_token
+    refresh-token-name: refresh_token
+    # Refresh cookie is only sent to the auth endpoints, not with every API call.
+    refresh-token-path: /api/v1/auth
+    secure: ${COOKIE_SECURE:false}       # true in prod: cookies only over HTTPS
+    same-site: ${COOKIE_SAME_SITE:Lax}   # Lax blocks cross-site POSTs (CSRF) but allows same-site front-ends
+    domain: ${COOKIE_DOMAIN:}            # empty = host-only cookie
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:8484}
+  upload:
+    dir: ${UPLOAD_DIR:./uploads}                        # uploaded files are stored here on the server
+    max-document-size: ${UPLOAD_MAX_DOCUMENT_SIZE:50MB}
+    max-video-size: ${UPLOAD_MAX_VIDEO_SIZE:500MB}
+    # extension -> MIME type stored in files.content_type (the client's Content-Type is not trusted)
+    document-types:
+      pdf: application/pdf
+      doc: application/msword
+      docx: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      ppt: application/vnd.ms-powerpoint
+      pptx: application/vnd.openxmlformats-officedocument.presentationml.presentation
+      xls: application/vnd.ms-excel
+      xlsx: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      txt: text/plain
+    video-types:
+      mp4: video/mp4
+      webm: video/webm
+      mov: video/quicktime
+      mkv: video/x-matroska
