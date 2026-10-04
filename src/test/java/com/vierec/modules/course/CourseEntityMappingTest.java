@@ -77,7 +77,7 @@ class CourseEntityMappingTest {
         assertThat(loadedFirst.getLessonFiles().get(0).getId().getLessonId()).isEqualTo(first.getId());
 
         CourseEnrollment loadedEnrollment = em.find(CourseEnrollment.class, enrollment.getId());
-        assertThat(loadedEnrollment.getStatus()).isEqualTo(EnrollmentStatus.ENROLLED);
+        assertThat(loadedEnrollment.getStatus()).isEqualTo(EnrollmentStatus.PENDING);
         assertThat(loadedEnrollment.getEnrolledAt()).isNotNull();
         assertThat(loadedEnrollment.getUpdatedAt()).isNotNull();
         assertThat(second.getId()).isNotNull();

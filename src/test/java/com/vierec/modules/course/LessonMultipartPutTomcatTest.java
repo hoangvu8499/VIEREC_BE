@@ -104,10 +104,10 @@ class LessonMultipartPutTomcatTest {
         form.add("title", "Tiêu đề mới");
         form.add("instructions", "Hướng dẫn mới");
         form.add("sortOrder", "3");
-        form.add("videoFile", new ByteArrayResource("video-bytes".getBytes(StandardCharsets.UTF_8)) {
+        form.add("documentFile", new ByteArrayResource("%PDF-1.4 moi".getBytes(StandardCharsets.UTF_8)) {
             @Override
             public String getFilename() {
-                return "moi.mp4";
+                return "moi.pdf";
             }
         });
         HttpHeaders headers = new HttpHeaders();
@@ -122,6 +122,6 @@ class LessonMultipartPutTomcatTest {
         JsonNode data = objectMapper.readTree(response.getBody()).path("data");
         assertThat(data.path("title").asText()).isEqualTo("Tiêu đề mới");
         assertThat(data.path("sortOrder").asInt()).isEqualTo(3);
-        assertThat(data.path("files").get(0).path("originalName").asText()).isEqualTo("moi.mp4");
+        assertThat(data.path("files").get(0).path("originalName").asText()).isEqualTo("moi.pdf");
     }
 }

@@ -9,6 +9,8 @@ public final class RoleCode {
     public static final String SUPER_ADMIN = "SUPER_ADMIN";
     public static final String ADMIN = "ADMIN";
     public static final String TRAINEE = "TRAINEE";
+    /** Manager of a corporate customer: creates, enrolls and follows the business's learners. */
+    public static final String BUSINESS = "BUSINESS";
 
     /** Role given to every self-registered account. */
     public static final String DEFAULT_FOR_REGISTRATION = TRAINEE;

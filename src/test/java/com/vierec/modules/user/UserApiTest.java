@@ -230,6 +230,24 @@ class UserApiTest {
                 .andExpect(jsonPath("$.data.roles", containsInAnyOrder(RoleCode.TRAINEE)));
     }
 
+    @Test
+    void adminUnlocksAnAccountLockedByWrongPasswords() throws Exception {
+        User target = user("nhanvien", RoleCode.TRAINEE);
+        jdbcTemplate.update("UPDATE users SET status = 'LOCKED', failed_login_count = 5, "
+                + "last_failed_login_at = CURRENT_TIMESTAMP WHERE id = ?", target.getId());
+        mockMvc.perform(get(USERS + "/" + target.getId()).cookie(admin))
+                .andExpect(jsonPath("$.data.status").value("LOCKED"))
+                .andExpect(jsonPath("$.data.failedLoginCount").value(5));
+
+        mockMvc.perform(put(USERS + "/" + target.getId()).cookie(admin).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.failedLoginCount").value(0));
+        assertThat(jdbcTemplate.queryForObject("SELECT last_failed_login_at FROM users WHERE id = ?", Object.class,
+                target.getId())).isNull();
+    }
+
     // ------------------------------------------------------------------ read / delete
 
     @Test

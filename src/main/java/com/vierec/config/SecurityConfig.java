@@ -35,6 +35,8 @@ public class SecurityConfig {
             AppConstants.API_V1 + "/auth/login",
             AppConstants.API_V1 + "/auth/refresh",
             AppConstants.API_V1 + "/auth/logout",
+            AppConstants.API_V1 + "/auth/forgot-password",
+            AppConstants.API_V1 + "/auth/reset-password",
             "/actuator/health/**",
             "/actuator/info",
             "/v3/api-docs/**",
@@ -65,7 +67,8 @@ public class SecurityConfig {
                 .authorizeRequests()
                 .antMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .antMatchers(PUBLIC_ENDPOINTS).permitAll()
-                .antMatchers(HttpMethod.GET, AppConstants.API_V1 + "/courses", AppConstants.API_V1 + "/courses/*")
+                .antMatchers(HttpMethod.GET, AppConstants.API_V1 + "/courses", AppConstants.API_V1 + "/courses/*",
+                        AppConstants.API_V1 + "/certificates/*")
                 .permitAll()
                 .antMatchers("/actuator/**").hasAnyRole(RoleCode.SUPER_ADMIN, RoleCode.ADMIN)
                 .anyRequest().authenticated();

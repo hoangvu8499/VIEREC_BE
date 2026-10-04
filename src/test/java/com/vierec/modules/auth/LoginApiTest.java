@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import javax.servlet.http.Cookie;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,7 +120,66 @@ class LoginApiTest {
     @Test
     void loginRejectsLockedAccount() throws Exception {
         jdbcTemplate.update("UPDATE users SET status = 'LOCKED' WHERE username = 'nguyenvana'");
-        login("nguyenvana", PASSWORD).andExpect(status().isUnauthorized());
+        login("nguyenvana", PASSWORD)
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("VRC-403-003"));
+    }
+
+    @Test
+    void fiveWrongPasswordsInARowLockTheAccount() throws Exception {
+        for (int i = 0; i < 4; i++) {
+            login("nguyenvana", "SaiMatKhau@1").andExpect(jsonPath("$.code").value("VRC-401-002"));
+        }
+        login("nguyenvana@vierec.com", "SaiMatKhau@1")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("VRC-403-003"));
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM users WHERE username = 'nguyenvana'",
+                String.class)).isEqualTo("LOCKED");
+
+        // The right password does not open a locked account; only an admin does.
+        login("nguyenvana", PASSWORD).andExpect(jsonPath("$.code").value("VRC-403-003"));
+        login("nguyenvana", "SaiMatKhau@1").andExpect(jsonPath("$.code").value("VRC-403-003"));
+        assertThat(failedLogins()).isEqualTo(5);
+    }
+
+    @Test
+    void aSuccessfulLoginResetsTheCount() throws Exception {
+        for (int i = 0; i < 4; i++) {
+            login("nguyenvana", "SaiMatKhau@1");
+        }
+        login("nguyenvana", PASSWORD).andExpect(status().isOk());
+        assertThat(failedLogins()).isZero();
+        for (int i = 0; i < 4; i++) {
+            login("nguyenvana", "SaiMatKhau@1");
+        }
+        login("nguyenvana", PASSWORD).andExpect(status().isOk());
+    }
+
+    @Test
+    void superAdminIsOnlyBlockedForFifteenMinutes() throws Exception {
+        if (!roleRepository.findByCode(RoleCode.SUPER_ADMIN).isPresent()) {
+            Role role = new Role();
+            role.setCode(RoleCode.SUPER_ADMIN);
+            role.setName("Super admin");
+            roleRepository.save(role);
+        }
+        jdbcTemplate.update("INSERT INTO user_roles (user_id, role_id, assigned_at) SELECT u.id, r.id, "
+                + "CURRENT_TIMESTAMP FROM users u, roles r WHERE u.username = 'nguyenvana' AND r.code = ?",
+                RoleCode.SUPER_ADMIN);
+
+        for (int i = 0; i < 5; i++) {
+            login("nguyenvana", "SaiMatKhau@1").andExpect(jsonPath("$.code").value("VRC-401-002"));
+        }
+        login("nguyenvana", PASSWORD)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("VRC-429-001"));
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM users WHERE username = 'nguyenvana'",
+                String.class)).isEqualTo("ACTIVE");
+
+        jdbcTemplate.update("UPDATE users SET last_failed_login_at = ? WHERE username = 'nguyenvana'",
+                LocalDateTime.now().minusMinutes(16));
+        login("nguyenvana", PASSWORD).andExpect(status().isOk());
+        assertThat(failedLogins()).isZero();
     }
 
     @Test
@@ -133,6 +193,11 @@ class LoginApiTest {
         mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors.length()").value(2));
+    }
+
+    private int failedLogins() {
+        return jdbcTemplate.queryForObject("SELECT failed_login_count FROM users WHERE username = 'nguyenvana'",
+                Integer.class);
     }
 
     // ------------------------------------------------------------------ using the cookies

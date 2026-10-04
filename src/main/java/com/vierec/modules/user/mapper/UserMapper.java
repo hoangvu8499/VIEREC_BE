@@ -2,6 +2,7 @@ package com.vierec.modules.user.mapper;
 
 import com.vierec.modules.auth.dto.RegisterRequest;
 import com.vierec.modules.role.entity.Role;
+import com.vierec.modules.user.dto.UpdateProfileRequest;
 import com.vierec.modules.user.dto.UpdateUserRequest;
 import com.vierec.modules.user.dto.UserResponse;
 import com.vierec.modules.user.entity.User;
@@ -24,6 +25,8 @@ import java.util.stream.Collectors;
 public interface UserMapper {
 
     @Mapping(target = "roles", expression = "java(toRoleCodes(user.getRoles()))")
+    @Mapping(target = "businessId", source = "business.id")
+    @Mapping(target = "businessName", source = "business.name")
     UserResponse toResponse(User user);
 
     @Mapping(target = "id", ignore = true)
@@ -42,6 +45,17 @@ public interface UserMapper {
     @Mapping(target = "roles", ignore = true)
     @Mapping(target = "deletedAt", ignore = true)
     void updateEntity(UpdateUserRequest request, @MappingTarget User user);
+
+    /** Like {@link #updateEntity} for the user's own profile: the status is never touched. */
+    @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "username", ignore = true)
+    @Mapping(target = "passwordHash", ignore = true)
+    @Mapping(target = "status", ignore = true)
+    @Mapping(target = "userRoles", ignore = true)
+    @Mapping(target = "roles", ignore = true)
+    @Mapping(target = "deletedAt", ignore = true)
+    void updateProfile(UpdateProfileRequest request, @MappingTarget User user);
 
     default Set<String> toRoleCodes(Set<Role> roles) {
         return roles.stream().map(Role::getCode).collect(Collectors.toSet());

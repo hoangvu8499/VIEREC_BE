@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -35,6 +36,8 @@ import java.util.UUID;
 public class FileStorageServiceImpl implements FileStorageService {
 
     private static final int MAX_NAME_LENGTH = 255;
+    private static final String PDF = "pdf";
+    private static final String PDF_TYPE = "application/pdf";
 
     private final StoredFileRepository storedFileRepository;
     private final UploadProperties properties;
@@ -100,9 +103,9 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     /** Checks extension and size; returns the MIME type configured for the extension. */
     private String contentTypeOf(MultipartFile file, FileCategory category) {
-        boolean video = category == FileCategory.VIDEO;
-        Map<String, String> allowed = video ? properties.getVideoTypes() : properties.getDocumentTypes();
-        DataSize maxSize = video ? properties.getMaxVideoSize() : properties.getMaxDocumentSize();
+        Map<String, String> allowed = category == FileCategory.CERTIFICATE
+                ? Collections.singletonMap(PDF, PDF_TYPE) : properties.getDocumentTypes();
+        DataSize maxSize = properties.getMaxDocumentSize();
         String kind = category.name().toLowerCase(Locale.ROOT);
 
         String name = originalName(file);

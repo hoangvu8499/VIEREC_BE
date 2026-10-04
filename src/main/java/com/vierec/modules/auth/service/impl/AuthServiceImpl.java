@@ -6,6 +6,7 @@ import com.vierec.modules.auth.dto.AuthResponse;
 import com.vierec.modules.auth.dto.LoginRequest;
 import com.vierec.modules.auth.service.AuthResult;
 import com.vierec.modules.auth.service.AuthService;
+import com.vierec.modules.auth.service.LoginAttemptService;
 import com.vierec.modules.user.mapper.UserMapper;
 import com.vierec.modules.user.repository.UserRepository;
 import com.vierec.security.CustomUserDetails;
@@ -14,6 +15,7 @@ import com.vierec.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -32,15 +34,27 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider tokenProvider;
     private final UserRepository userRepository;
     private final UserMapper userMapper;
+    private final LoginAttemptService loginAttemptService;
 
     @Override
     public AuthResult login(LoginRequest request) {
+        String username = request.getUsername().trim();
+        loginAttemptService.checkNotBlocked(username);
         // Any failure here (bad password, locked or inactive account) surfaces as an
         // AuthenticationException and is mapped by GlobalExceptionHandler.
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.getUsername().trim(), request.getPassword()));
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(username, request.getPassword()));
+        } catch (BadCredentialsException ex) {
+            if (loginAttemptService.recordFailure(username)) {
+                throw new BusinessException(ErrorCode.ACCOUNT_LOCKED);
+            }
+            throw ex;
+        }
 
         CustomUserDetails principal = (CustomUserDetails) authentication.getPrincipal();
+        loginAttemptService.recordSuccess(principal.getId());
         log.info("User {} logged in", principal.getUsername());
         return issueTokens(principal);
     }

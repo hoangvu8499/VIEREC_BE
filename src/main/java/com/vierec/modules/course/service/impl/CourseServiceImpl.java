@@ -7,9 +7,12 @@ import com.vierec.common.exception.ResourceNotFoundException;
 import com.vierec.modules.course.dto.CourseDetailResponse;
 import com.vierec.modules.course.dto.CourseResponse;
 import com.vierec.modules.course.dto.CourseRequest;
+import com.vierec.modules.course.dto.LessonResponse;
 import com.vierec.modules.course.entity.Course;
 import com.vierec.modules.course.entity.CourseStatus;
+import com.vierec.modules.course.entity.EnrollmentStatus;
 import com.vierec.modules.course.mapper.CourseMapper;
+import com.vierec.modules.course.repository.CourseEnrollmentRepository;
 import com.vierec.modules.course.repository.CourseRepository;
 import com.vierec.modules.course.repository.LessonRepository;
 import com.vierec.modules.course.service.CourseService;
@@ -41,27 +44,46 @@ public class CourseServiceImpl implements CourseService {
 
     private final CourseRepository courseRepository;
     private final LessonRepository lessonRepository;
+    private final CourseEnrollmentRepository enrollmentRepository;
     private final UserRepository userRepository;
     private final CourseMapper courseMapper;
 
     @Override
-    public PageResponse<CourseResponse> list(String keyword, CourseStatus status, int page, boolean publishedOnly) {
+    public PageResponse<CourseResponse> list(String keyword, CourseStatus status, int page, boolean publishedOnly,
+                                             String username, boolean excludeLearning) {
         String normalized = StringUtils.hasText(keyword) ? keyword.trim() : null;
         CourseStatus effectiveStatus = publishedOnly ? CourseStatus.PUBLISHED : status;
 
         Page<Course> courses = courseRepository.search(normalized, effectiveStatus,
+                excludeLearning ? username : null, EnrollmentStatus.LEARNING,
                 PageRequest.of(page, PAGE_SIZE, NEWEST_FIRST));
         Map<Long, Long> lessonCounts = lessonCounts(courses.getContent());
-        return PageResponse.of(courses,
-                course -> courseMapper.toResponse(course, lessonCounts.getOrDefault(course.getId(), 0L)));
+        Map<Long, EnrollmentStatus> enrollments = enrollmentStatuses(username, courses.getContent());
+        return PageResponse.of(courses, course -> {
+            CourseResponse response = courseMapper.toResponse(course, lessonCounts.getOrDefault(course.getId(), 0L));
+            response.setMyEnrollmentStatus(enrollments.get(course.getId()));
+            return response;
+        });
     }
 
     @Override
-    public CourseDetailResponse get(Long id, boolean publishedOnly) {
+    public CourseDetailResponse get(Long id, boolean publishedOnly, String username) {
         Course course = courseRepository.findDetailById(id)
                 .filter(found -> !publishedOnly || found.getStatus() == CourseStatus.PUBLISHED)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorCode.COURSE_NOT_FOUND));
-        return courseMapper.toDetailResponse(course, lessonRepository.findAllWithFilesByCourseId(id));
+        CourseDetailResponse response = courseMapper.toDetailResponse(course,
+                lessonRepository.findAllWithFilesByCourseId(id));
+        EnrollmentStatus enrollment = enrollmentStatuses(username, Collections.singletonList(course)).get(id);
+        response.setMyEnrollmentStatus(enrollment);
+        // Admins call with publishedOnly = false. Everyone else only sees the outline until their payment is approved.
+        if (publishedOnly && !EnrollmentStatus.LEARNING.contains(enrollment) && response.getLessons() != null) {
+            for (LessonResponse lesson : response.getLessons()) {
+                lesson.setDocumentUrl(null);
+                lesson.setVideoUrl(null);
+                lesson.setFiles(Collections.emptyList());
+            }
+        }
+        return response;
     }
 
     @Override
@@ -123,7 +145,21 @@ public class CourseServiceImpl implements CourseService {
         course.setName(request.getName().trim());
         course.setDescription(request.getDescription().trim());
         course.setInstructor(instructor);
+        course.setPrice(request.getPrice());
         course.setStatus(request.getStatus());
+    }
+
+    /** Course id to the caller's enrollment status; empty for anonymous callers. */
+    private Map<Long, EnrollmentStatus> enrollmentStatuses(String username, List<Course> courses) {
+        if (username == null || courses.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<Long> ids = courses.stream().map(Course::getId).collect(Collectors.toList());
+        Map<Long, EnrollmentStatus> statuses = new HashMap<>();
+        for (Object[] row : enrollmentRepository.findStatuses(username, ids)) {
+            statuses.put((Long) row[0], (EnrollmentStatus) row[1]);
+        }
+        return statuses;
     }
 
     /** One grouped query for the whole page instead of one count per course. */

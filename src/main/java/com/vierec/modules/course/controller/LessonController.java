@@ -6,6 +6,7 @@ import com.vierec.modules.course.dto.CreateLessonRequest;
 import com.vierec.modules.course.dto.LessonResponse;
 import com.vierec.modules.course.dto.UpdateLessonRequest;
 import com.vierec.modules.course.service.LessonService;
+import com.vierec.security.access.AdminOnly;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -13,7 +14,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -37,10 +37,10 @@ public class LessonController {
     private final LessonService lessonService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Create a lesson (multipart/form-data)",
-            description = "title, instructions, sortOrder and documentFile are required. The video is optional: "
-                    + "upload videoFile, give videoUrl (link to another system), both or neither.")
+            description = "title, instructions, sortOrder and documentFile are required. videoUrl is an optional "
+                    + "YouTube link.")
     public ResponseEntity<ApiResponse<LessonResponse>> create(@PathVariable @Positive Long courseId,
                                                               @Valid @ModelAttribute CreateLessonRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -48,10 +48,10 @@ public class LessonController {
     }
 
     @PutMapping(value = "/{lessonId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Update a lesson (multipart/form-data)",
-            description = "title, instructions and sortOrder are required. documentFile / videoFile are optional: "
-                    + "send one to replace that file, leave it out to keep the current one.")
+            description = "title, instructions and sortOrder are required. documentFile is optional: send it to "
+                    + "replace the document, leave it out to keep the current one. videoUrl is a YouTube link.")
     public ApiResponse<LessonResponse> update(@PathVariable @Positive Long courseId,
                                               @PathVariable @Positive Long lessonId,
                                               @Valid @ModelAttribute UpdateLessonRequest request) {
@@ -59,7 +59,7 @@ public class LessonController {
     }
 
     @DeleteMapping("/{lessonId}")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Soft-delete a lesson")
     public ResponseEntity<Void> delete(@PathVariable @Positive Long courseId,
                                        @PathVariable @Positive Long lessonId) {

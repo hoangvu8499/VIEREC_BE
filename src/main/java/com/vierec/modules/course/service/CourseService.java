@@ -16,15 +16,22 @@ public interface CourseService {
      *
      * @param page          0-based page number
      * @param publishedOnly true for users who may only see {@code PUBLISHED} courses; {@code status} is ignored
+     * @param username        caller, for {@code myEnrollmentStatus}; null when anonymous
+     * @param excludeLearning true leaves out the courses the caller is ENROLLED in or COMPLETED (no effect when
+     *                        anonymous), e.g. for the "courses to sign up for" page
      */
-    PageResponse<CourseResponse> list(String keyword, CourseStatus status, int page, boolean publishedOnly);
+    PageResponse<CourseResponse> list(String keyword, CourseStatus status, int page, boolean publishedOnly,
+                                      String username, boolean excludeLearning);
 
     /**
      * Course with its lessons.
      *
-     * @param publishedOnly true for users who may only see {@code PUBLISHED} courses; other courses are not found
+     * @param publishedOnly true for users who may only see {@code PUBLISHED} courses; other courses are not found,
+     *                      and lesson videos and files are left out unless the caller's enrollment is
+     *                      {@link com.vierec.modules.course.entity.EnrollmentStatus#LEARNING}
+     * @param username      caller, for {@code myEnrollmentStatus}; null when anonymous
      */
-    CourseDetailResponse get(Long id, boolean publishedOnly);
+    CourseDetailResponse get(Long id, boolean publishedOnly, String username);
 
     CourseResponse create(CourseRequest request, String creatorUsername);
 

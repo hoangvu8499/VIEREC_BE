@@ -37,6 +37,8 @@ public class Course extends BaseEntity {
 
     private static final long serialVersionUID = 1L;
 
+    public static final long DEFAULT_PRICE = 100_000L;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -52,6 +54,10 @@ public class Course extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "instructor_id")
     private User instructor;
+
+    /** Học phí (VND). Rows created before prices existed got the column default (100,000). */
+    @Column(name = "price", nullable = false)
+    private Long price = DEFAULT_PRICE;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, columnDefinition = "enum('DRAFT','PUBLISHED','ARCHIVED')")

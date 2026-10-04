@@ -1,9 +1,6 @@
 spring:
   jpa:
     show-sql: false
-  datasource:
-    hikari:
-      maximum-pool-size: ${DB_POOL_MAX:20}
 
 server:
   error:

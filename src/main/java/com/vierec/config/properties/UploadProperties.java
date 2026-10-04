@@ -31,14 +31,7 @@ public class UploadProperties {
     @NotNull
     private DataSize maxDocumentSize = DataSize.ofMegabytes(50);
 
-    @NotNull
-    private DataSize maxVideoSize = DataSize.ofMegabytes(500);
-
     /** Allowed document extensions (lower case) and the MIME type stored for each. */
     @NotEmpty
     private Map<String, String> documentTypes = new LinkedHashMap<>();
-
-    /** Allowed video extensions (lower case) and the MIME type stored for each. */
-    @NotEmpty
-    private Map<String, String> videoTypes = new LinkedHashMap<>();
 }

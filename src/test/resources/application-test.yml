@@ -12,6 +12,7 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
+        generate_statistics: true
 
 app:
   seed-admin: false
@@ -19,3 +20,7 @@ app:
     secret: test-secret-key-for-unit-tests-only-32chars
   upload:
     dir: target/test-uploads
+
+logging:
+  level:
+    org.hibernate.engine.internal.StatisticalLoggingSessionEventListener: WARN

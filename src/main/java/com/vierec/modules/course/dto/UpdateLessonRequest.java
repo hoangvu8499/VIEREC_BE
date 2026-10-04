@@ -1,5 +1,6 @@
 package com.vierec.modules.course.dto;
 
+import com.vierec.modules.course.validation.YoutubeUrl;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -10,13 +11,12 @@ import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Pattern;
 import javax.validation.constraints.Size;
 
 /**
  * Multipart form of {@code PUT /api/v1/courses/{courseId}/lessons/{lessonId}}. Title, instructions and sort
- * order are required. A file part replaces the current file of that type and may be left out (or empty) to
- * keep it. {@code videoUrl} is replaced like the text fields: leaving it out removes the link.
+ * order are required. A new document replaces the current one and may be left out (or empty) to keep it.
+ * {@code videoUrl} (YouTube) is replaced like the text fields: leaving it out removes the link.
  */
 @Getter
 @Setter
@@ -44,15 +44,12 @@ public class UpdateLessonRequest {
             type = "string", format = "binary")
     private MultipartFile documentFile;
 
-    @Schema(description = "Optional new video: mp4, webm, mov, mkv", type = "string", format = "binary")
-    private MultipartFile videoFile;
-
-    @Schema(description = "true removes the uploaded video; ignored when a new videoFile is sent")
+    @Schema(description = "true unlinks the video file uploaded before lessons became YouTube only")
     private boolean removeVideo;
 
     @Size(max = CreateLessonRequest.VIDEO_URL_MAX, message = "{lesson.videoUrl.size}")
-    @Pattern(regexp = CreateLessonRequest.VIDEO_URL_PATTERN, message = "{lesson.videoUrl.pattern}")
-    @Schema(description = "Link to a video on another system; empty or missing removes the link",
-            example = "https://youtu.be/abc123")
+    @YoutubeUrl
+    @Schema(description = "YouTube link of the lecture video; empty or missing removes the link",
+            example = "https://youtu.be/dQw4w9WgXcQ")
     private String videoUrl;
 }

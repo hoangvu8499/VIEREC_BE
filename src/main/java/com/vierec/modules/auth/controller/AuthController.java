@@ -3,10 +3,15 @@ package com.vierec.modules.auth.controller;
 import com.vierec.common.constant.AppConstants;
 import com.vierec.common.dto.ApiResponse;
 import com.vierec.modules.auth.dto.AuthResponse;
+import com.vierec.modules.auth.dto.ForgotPasswordRequest;
 import com.vierec.modules.auth.dto.LoginRequest;
 import com.vierec.modules.auth.dto.RegisterRequest;
+import com.vierec.modules.auth.dto.ResetPasswordRequest;
 import com.vierec.modules.auth.service.AuthResult;
 import com.vierec.modules.auth.service.AuthService;
+import com.vierec.modules.auth.service.PasswordResetService;
+import com.vierec.modules.user.dto.ChangePasswordRequest;
+import com.vierec.modules.user.dto.UpdateProfileRequest;
 import com.vierec.modules.user.dto.UserResponse;
 import com.vierec.modules.user.service.UserService;
 import com.vierec.security.AuthCookieService;
@@ -19,6 +24,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,6 +42,7 @@ public class AuthController {
     private final AuthService authService;
     private final UserService userService;
     private final AuthCookieService authCookieService;
+    private final PasswordResetService passwordResetService;
 
     @PostMapping("/register")
     @Operation(summary = "Register a new trainee account")
@@ -51,6 +58,24 @@ public class AuthController {
         AuthResult result = authService.login(request);
         authCookieService.writeTokens(response, result.getAccessToken(), result.getRefreshToken());
         return ApiResponse.success(result.getBody(), "Login successful");
+    }
+
+    @PostMapping("/forgot-password")
+    @Operation(summary = "Email a 6-digit code to reset the password",
+            description = "Always 200, whether the email belongs to an account or not. A new code replaces the "
+                    + "previous one; asking again within 60 seconds sends nothing. The code is valid 10 minutes.")
+    public ApiResponse<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        passwordResetService.sendCode(request.getEmail());
+        return ApiResponse.success(null, "If the email belongs to an account, a code was sent to it");
+    }
+
+    @PostMapping("/reset-password")
+    @Operation(summary = "Set a new password with the emailed code",
+            description = "RESET_CODE_INVALID when the code is wrong, expired, replaced or tried 5 times. "
+                    + "A locked account stays locked until an admin unlocks it.")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        passwordResetService.resetPassword(request.getEmail(), request.getCode(), request.getNewPassword());
+        return ApiResponse.success(null, "Password changed");
     }
 
     @PostMapping("/refresh")
@@ -78,5 +103,25 @@ public class AuthController {
     @SecurityRequirement(name = AppConstants.AUTH_COOKIE_SCHEME)
     public ApiResponse<UserResponse> me(Authentication authentication) {
         return ApiResponse.success(userService.getByUsername(authentication.getName()));
+    }
+
+    @PutMapping("/me")
+    @Operation(summary = "Update the profile of the currently logged-in user",
+            description = "Omitted fields are left unchanged; status, roles, username and password are ignored. "
+                    + "Once a certificate was issued, name, date of birth and CCCD are locked (VRC-409-105).")
+    @SecurityRequirement(name = AppConstants.AUTH_COOKIE_SCHEME)
+    public ApiResponse<UserResponse> updateMe(@Valid @RequestBody UpdateProfileRequest request,
+                                              Authentication authentication) {
+        return ApiResponse.success(userService.updateProfile(authentication.getName(), request), "Profile updated");
+    }
+
+    @PutMapping("/me/password")
+    @Operation(summary = "Change the password of the currently logged-in user",
+            description = "Existing tokens stay valid until they expire.")
+    @SecurityRequirement(name = AppConstants.AUTH_COOKIE_SCHEME)
+    public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request,
+                                               Authentication authentication) {
+        userService.changePassword(authentication.getName(), request);
+        return ResponseEntity.noContent().build();
     }
 }

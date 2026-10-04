@@ -27,6 +27,15 @@ public interface LessonRepository extends JpaRepository<Lesson, Long> {
             + "WHERE l.course.id = :courseId ORDER BY l.sortOrder ASC, l.id ASC")
     List<Lesson> findAllWithFilesByCourseId(@Param("courseId") Long courseId);
 
+    /** {@link #findAllWithFilesByCourseId} for several courses. */
+    @Query("SELECT DISTINCT l FROM Lesson l LEFT JOIN FETCH l.lessonFiles lf LEFT JOIN FETCH lf.file "
+            + "WHERE l.course.id IN :courseIds ORDER BY l.sortOrder ASC, l.id ASC")
+    List<Lesson> findAllWithFilesByCourseIds(@Param("courseIds") Collection<Long> courseIds);
+
+    /** Courses whose lessons (deleted ones included) use file {@code fileId}; empty for files of other modules. */
+    @Query("SELECT DISTINCT lf.lesson.course.id FROM LessonFile lf WHERE lf.file.id = :fileId")
+    List<Long> findCourseIdsByFileId(@Param("fileId") Long fileId);
+
     /** Rows of {@code [courseId, lessonCount]}; courses without lessons are absent. */
     @Query("SELECT l.course.id, COUNT(l) FROM Lesson l WHERE l.course.id IN :courseIds GROUP BY l.course.id")
     List<Object[]> countByCourseIds(@Param("courseIds") Collection<Long> courseIds);

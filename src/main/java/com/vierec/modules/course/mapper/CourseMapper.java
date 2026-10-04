@@ -2,10 +2,14 @@ package com.vierec.modules.course.mapper;
 
 import com.vierec.modules.course.dto.CourseDetailResponse;
 import com.vierec.modules.course.dto.CourseResponse;
+import com.vierec.modules.course.dto.EnrollmentResponse;
 import com.vierec.modules.course.dto.LessonResponse;
+import com.vierec.modules.course.dto.VideoProgressResponse;
 import com.vierec.modules.course.entity.Course;
+import com.vierec.modules.course.entity.CourseEnrollment;
 import com.vierec.modules.course.entity.Lesson;
 import com.vierec.modules.course.entity.LessonFile;
+import com.vierec.modules.course.entity.LessonProgress;
 import com.vierec.modules.file.service.FileStorageService;
 import com.vierec.modules.user.entity.User;
 import org.mapstruct.Mapper;
@@ -46,6 +50,26 @@ public interface CourseMapper {
     @Mapping(target = "sizeBytes", source = "file.sizeBytes")
     @Mapping(target = "url", expression = "java(FileStorageService.downloadUrl(lessonFile.getFile().getId()))")
     LessonResponse.FileItem toFileItem(LessonFile lessonFile);
+
+    @Mapping(target = "id", source = "enrollment.id")
+    @Mapping(target = "courseId", source = "enrollment.course.id")
+    @Mapping(target = "courseName", source = "enrollment.course.name")
+    @Mapping(target = "courseDescription", source = "enrollment.course.description")
+    @Mapping(target = "instructorName", expression = "java(fullName(enrollment.getCourse().getInstructor()))")
+    @Mapping(target = "userId", source = "enrollment.user.id")
+    @Mapping(target = "username", source = "enrollment.user.username")
+    @Mapping(target = "fullName", expression = "java(fullName(enrollment.getUser()))")
+    @Mapping(target = "businessName", source = "enrollment.user.business.name")
+    @Mapping(target = "status", source = "enrollment.status")
+    @Mapping(target = "price", source = "enrollment.price")
+    @Mapping(target = "enrolledAt", source = "enrollment.enrolledAt")
+    @Mapping(target = "approvedAt", source = "enrollment.approvedAt")
+    @Mapping(target = "completedAt", source = "enrollment.completedAt")
+    @Mapping(target = "lessonCount", source = "lessonCount")
+    EnrollmentResponse toEnrollmentResponse(CourseEnrollment enrollment, long lessonCount);
+
+    @Mapping(target = "lessonId", source = "lesson.id")
+    VideoProgressResponse toVideoProgress(LessonProgress progress);
 
     /** Vietnamese order: last name (họ) then first name (tên). */
     default String fullName(User user) {

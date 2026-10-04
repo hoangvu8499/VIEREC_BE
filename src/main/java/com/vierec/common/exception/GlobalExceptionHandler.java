@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindException;
@@ -58,7 +59,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             log.warn("Application error [{}] on {} {}: {}", errorCode.getCode(),
                     request.getMethod(), request.getRequestURI(), ex.getMessage());
         }
-        return build(errorCode, ex.getMessage(), request, null);
+        return build(errorCode, ex.getMessage(), request, ex.getViolations());
     }
 
     // ------------------------------------------------------------------ validation
@@ -142,6 +143,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<ErrorResponse> handleDisabled(DisabledException ex, HttpServletRequest request) {
         return build(ErrorCode.ACCOUNT_DISABLED, ErrorCode.ACCOUNT_DISABLED.getDefaultMessage(),
                 request, null);
+    }
+
+    /** Locked by wrong passwords (or by an admin): only an admin can set it back to ACTIVE. */
+    @ExceptionHandler(LockedException.class)
+    public ResponseEntity<ErrorResponse> handleLocked(LockedException ex, HttpServletRequest request) {
+        return build(ErrorCode.ACCOUNT_LOCKED, ErrorCode.ACCOUNT_LOCKED.getDefaultMessage(), request, null);
     }
 
     @ExceptionHandler(AuthenticationException.class)

@@ -9,6 +9,7 @@ import com.vierec.modules.user.dto.UpdateUserRequest;
 import com.vierec.modules.user.dto.UserResponse;
 import com.vierec.modules.user.entity.UserStatus;
 import com.vierec.modules.user.service.UserService;
+import com.vierec.security.access.AdminOnly;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,7 +18,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -44,7 +44,7 @@ public class UserController {
     private final UserService userService;
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Create a user with roles",
             description = "Same fields and rules as registration, plus roles (required) and status (default ACTIVE). "
                     + "Only a SUPER_ADMIN may create a SUPER_ADMIN.")
@@ -55,14 +55,14 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Get a user by id")
     public ApiResponse<UserResponse> getById(@PathVariable @Positive Long id) {
         return ApiResponse.success(userService.getById(id));
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Search users with paging and sorting")
     public ApiResponse<PageResponse<UserResponse>> search(
             @RequestParam(required = false) String keyword,
@@ -72,7 +72,7 @@ public class UserController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Update a user")
     public ApiResponse<UserResponse> update(@PathVariable @Positive Long id,
                                             @Valid @RequestBody UpdateUserRequest request) {
@@ -80,7 +80,7 @@ public class UserController {
     }
 
     @PutMapping("/{id}/roles")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Replace the roles of a user",
             description = "Only a SUPER_ADMIN may grant or remove SUPER_ADMIN or change a SUPER_ADMIN's roles. "
                     + "Nobody may change their own roles. Takes effect at the user's next login or token refresh "
@@ -92,7 +92,7 @@ public class UserController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN')")
+    @AdminOnly
     @Operation(summary = "Soft-delete a user")
     public ResponseEntity<Void> delete(@PathVariable @Positive Long id) {
         userService.delete(id);

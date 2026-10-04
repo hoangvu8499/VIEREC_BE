@@ -2,6 +2,9 @@ package com.vierec.common.exception;
 
 import lombok.Getter;
 
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Base class for every exception the application raises deliberately.
  *
@@ -15,18 +18,28 @@ public class AppException extends RuntimeException {
 
     private final ErrorCode errorCode;
 
+    /** Item-level problems returned as {@code errors} (e.g. the invalid rows of an imported file); may be null. */
+    private final List<ErrorResponse.FieldViolation> violations;
+
     public AppException(ErrorCode errorCode) {
-        super(errorCode.getDefaultMessage());
-        this.errorCode = errorCode;
+        this(errorCode, errorCode.getDefaultMessage());
     }
 
     public AppException(ErrorCode errorCode, String message) {
         super(message);
         this.errorCode = errorCode;
+        this.violations = null;
     }
 
     public AppException(ErrorCode errorCode, String message, Throwable cause) {
         super(message, cause);
         this.errorCode = errorCode;
+        this.violations = null;
+    }
+
+    public AppException(ErrorCode errorCode, List<ErrorResponse.FieldViolation> violations) {
+        super(errorCode.getDefaultMessage());
+        this.errorCode = errorCode;
+        this.violations = Collections.unmodifiableList(violations);
     }
 }

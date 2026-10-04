@@ -15,9 +15,10 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       pool-name: vierec-pool
-      maximum-pool-size: ${DB_POOL_MAX:10}
-      minimum-idle: 2
-      connection-timeout: 30000
+      # Requests hold a connection only for their short transactions; 20 serves ~500 concurrent users.
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: 5
+      connection-timeout: 10000
       idle-timeout: 600000
       max-lifetime: 1800000
 
@@ -28,6 +29,10 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQL8Dialect
+        # Lazy associations of a page of rows load in one IN (...) query instead of one query per row.
+        default_batch_fetch_size: 100
+        query:
+          in_clause_parameter_padding: true
         jdbc:
           batch_size: 50
           time_zone: Asia/Ho_Chi_Minh
@@ -49,15 +54,34 @@ spring:
     resources:
       add-mappings: false      # required for the 404 above to reach the handler
 
+  # SMTP for password reset codes (Gmail app password, Zoho, SendGrid...). Empty host: emails go to the log.
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    default-encoding: UTF-8
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+
   servlet:
     multipart:
-      # Hard ceiling checked by the container; per-type limits are app.upload.max-*-size.
-      max-file-size: ${UPLOAD_MAX_FILE_SIZE:500MB}
-      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:600MB}
+      # Hard ceiling checked by the container; the per-type limit is app.upload.max-document-size.
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:60MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:70MB}
 
 server:
   port: ${SERVER_PORT:8383}
   shutdown: graceful
+  tomcat:
+    threads:
+      max: ${SERVER_MAX_THREADS:200}
+      min-spare: 20
+    accept-count: 200
   error:
     include-message: never
     include-stacktrace: never
@@ -71,6 +95,9 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  health:
+    mail:
+      enabled: false           # an unreachable SMTP server must not mark the whole app DOWN
   endpoint:
     health:
       show-details: when-authorized
@@ -106,10 +133,19 @@ app:
     domain: ${COOKIE_DOMAIN:}            # empty = host-only cookie
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:8484}
+  frontend:
+    base-url: ${FRONTEND_URL:http://localhost:8484}   # printed in the QR code of generated certificates
+  mail:
+    from: ${MAIL_FROM:VIEREC Academy <no-reply@vierec.vn>}
+  geocoding:
+    # OpenStreetMap Nominatim: free, no key; needs a real User-Agent, max 1 request/second.
+    base-url: ${GEOCODING_BASE_URL:https://nominatim.openstreetmap.org/search}
+    user-agent: ${GEOCODING_USER_AGENT:VIEREC-Academy/1.0}
+    country-codes: vn
+    timeout: 5s
   upload:
     dir: ${UPLOAD_DIR:./uploads}                        # uploaded files are stored here on the server
     max-document-size: ${UPLOAD_MAX_DOCUMENT_SIZE:50MB}
-    max-video-size: ${UPLOAD_MAX_VIDEO_SIZE:500MB}
     # extension -> MIME type stored in files.content_type (the client's Content-Type is not trusted)
     document-types:
       pdf: application/pdf
@@ -120,8 +156,3 @@ app:
       xls: application/vnd.ms-excel
       xlsx: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
       txt: text/plain
-    video-types:
-      mp4: video/mp4
-      webm: video/webm
-      mov: video/quicktime
-      mkv: video/x-matroska

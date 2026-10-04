@@ -5,11 +5,15 @@ import com.vierec.common.exception.BusinessException;
 import com.vierec.common.exception.ErrorCode;
 import com.vierec.common.exception.ResourceNotFoundException;
 import com.vierec.modules.auth.dto.RegisterRequest;
+import com.vierec.modules.business.entity.Business;
+import com.vierec.modules.certificate.repository.CertificateRepository;
 import com.vierec.modules.role.entity.Role;
 import com.vierec.modules.role.entity.RoleCode;
 import com.vierec.modules.role.repository.RoleRepository;
 import com.vierec.modules.user.dto.AssignRolesRequest;
+import com.vierec.modules.user.dto.ChangePasswordRequest;
 import com.vierec.modules.user.dto.CreateUserRequest;
+import com.vierec.modules.user.dto.UpdateProfileRequest;
 import com.vierec.modules.user.dto.UpdateUserRequest;
 import com.vierec.modules.user.dto.UserResponse;
 import com.vierec.modules.user.entity.User;
@@ -42,6 +46,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final CertificateRepository certificateRepository;
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
 
@@ -87,7 +92,8 @@ public class UserServiceImpl implements UserService {
         if (userRepository.countByPhoneNumberIncludingDeleted(request.getPhoneNumber()) > 0) {
             throw new BusinessException(ErrorCode.PHONE_ALREADY_EXISTS);
         }
-        if (userRepository.countByCccdIncludingDeleted(request.getCccd()) > 0) {
+        // A business manager account has no CCCD.
+        if (request.getCccd() != null && userRepository.countByCccdIncludingDeleted(request.getCccd()) > 0) {
             throw new BusinessException(ErrorCode.CCCD_ALREADY_EXISTS);
         }
 
@@ -95,7 +101,7 @@ public class UserServiceImpl implements UserService {
         user.setUsername(request.getUsername().trim());
         user.setFirstName(request.getFirstName().trim());
         user.setLastName(request.getLastName().trim());
-        user.setAddress(request.getAddress().trim());
+        user.setAddress(request.getAddress() == null ? null : request.getAddress().trim());
         user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setStatus(status);
@@ -103,6 +109,19 @@ public class UserServiceImpl implements UserService {
             user.addRole(role, assignedBy);
         }
         return userRepository.save(user);
+    }
+
+    @Override
+    @Transactional
+    public User createBusinessAccount(RegisterRequest request, String roleCode, Business business,
+                                      String actorUsername) {
+        User actor = findActor(actorUsername);
+        User user = createUser(request, findRoles(Collections.singleton(roleCode)), UserStatus.ACTIVE, actor.getId());
+        user.setBusiness(business);
+        User saved = userRepository.saveAndFlush(user);
+        log.info("User id={} created {} account id={} in business id={}", actor.getId(), roleCode, saved.getId(),
+                business.getId());
+        return saved;
     }
 
     @Override
@@ -128,7 +147,49 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public UserResponse update(Long id, UpdateUserRequest request) {
         User user = findEntityById(id);
+        checkUnique(user, request);
+        boolean unlocking = user.getStatus() == UserStatus.LOCKED && request.getStatus() == UserStatus.ACTIVE;
+        userMapper.updateEntity(request, user);
+        if (unlocking) {
+            user.setFailedLoginCount(0);
+            user.setLastFailedLoginAt(null);
+        }
 
+        User saved = userRepository.save(user);
+        log.info("Updated user id={}{}", saved.getId(), unlocking ? " (unlocked)" : "");
+        return userMapper.toResponse(saved);
+    }
+
+    @Override
+    @Transactional
+    public UserResponse updateProfile(String username, UpdateProfileRequest request) {
+        User user = findActor(username);
+        if (changesIdentity(user, request) && certificateRepository.existsByUserId(user.getId())) {
+            throw new BusinessException(ErrorCode.IDENTITY_LOCKED);
+        }
+        checkUnique(user, request);
+        userMapper.updateProfile(request, user);
+
+        User saved = userRepository.save(user);
+        log.info("User id={} updated their profile", saved.getId());
+        return userMapper.toResponse(saved);
+    }
+
+    @Override
+    @Transactional
+    public void changePassword(String username, ChangePasswordRequest request) {
+        User user = findActor(username);
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.INVALID_CREDENTIALS, "Current password is incorrect");
+        }
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setMustChangePassword(false);
+        userRepository.save(user);
+        log.info("User id={} changed their password", user.getId());
+    }
+
+    /** Normalizes the email of the request, then rejects values already used by another row. */
+    private void checkUnique(User user, UpdateProfileRequest request) {
         if (request.getEmail() != null) {
             request.setEmail(normalizeEmail(request.getEmail()));
             if (!request.getEmail().equals(user.getEmail())
@@ -146,12 +207,18 @@ public class UserServiceImpl implements UserService {
                 && userRepository.countByCccdIncludingDeleted(request.getCccd()) > 0) {
             throw new BusinessException(ErrorCode.CCCD_ALREADY_EXISTS);
         }
+    }
 
-        userMapper.updateEntity(request, user);
+    /** True when a sent name, date of birth or CCCD differs from the stored value (the fields on a certificate). */
+    private static boolean changesIdentity(User user, UpdateProfileRequest request) {
+        return differs(request.getFirstName(), user.getFirstName())
+                || differs(request.getLastName(), user.getLastName())
+                || differs(request.getDateOfBirth(), user.getDateOfBirth())
+                || differs(request.getCccd(), user.getCccd());
+    }
 
-        User saved = userRepository.save(user);
-        log.info("Updated user id={}", saved.getId());
-        return userMapper.toResponse(saved);
+    private static boolean differs(Object sent, Object current) {
+        return sent != null && !sent.equals(current);
     }
 
     @Override
@@ -214,7 +281,7 @@ public class UserServiceImpl implements UserService {
 
     /** Read from the DB, not from the JWT, so a role removed in the last 30 minutes no longer counts. */
     private static boolean isSuperAdmin(User user) {
-        return user.getRoles().stream().anyMatch(role -> RoleCode.SUPER_ADMIN.equals(role.getCode()));
+        return user.hasRole(RoleCode.SUPER_ADMIN);
     }
 
     private User findEntityById(Long id) {

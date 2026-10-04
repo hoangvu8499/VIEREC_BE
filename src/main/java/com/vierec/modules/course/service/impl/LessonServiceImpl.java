@@ -36,7 +36,6 @@ public class LessonServiceImpl implements LessonService {
     /** Sub-folder of {@code app.upload.dir} for lesson files. */
     private static final String UPLOAD_FOLDER = "lessons";
     private static final int DOCUMENT_SORT = 1;
-    private static final int VIDEO_SORT = 2;
 
     private final CourseRepository courseRepository;
     private final LessonRepository lessonRepository;
@@ -51,12 +50,7 @@ public class LessonServiceImpl implements LessonService {
         if (lessonRepository.existsByCourseIdAndSortOrder(courseId, request.getSortOrder())) {
             throw new BusinessException(ErrorCode.LESSON_SORT_ORDER_EXISTS);
         }
-        boolean withVideo = hasContent(request.getVideoFile());
-        // Check both files before writing either, so a bad video does not leave a stored document behind.
         fileStorageService.validate(request.getDocumentFile(), FileCategory.DOCUMENT);
-        if (withVideo) {
-            fileStorageService.validate(request.getVideoFile(), FileCategory.VIDEO);
-        }
 
         // Written files are removed again if anything below rolls the transaction back.
         StoredFile document = fileStorageService.store(request.getDocumentFile(), FileCategory.DOCUMENT,
@@ -70,14 +64,10 @@ public class LessonServiceImpl implements LessonService {
         lesson.setDocumentUrl(FileStorageService.downloadUrl(document.getId()));
         lesson.setVideoUrl(normalizeUrl(request.getVideoUrl()));
         lesson.getLessonFiles().add(new LessonFile(lesson, document, LessonFileType.DOCUMENT, DOCUMENT_SORT));
-        if (withVideo) {
-            StoredFile video = fileStorageService.store(request.getVideoFile(), FileCategory.VIDEO, UPLOAD_FOLDER);
-            lesson.getLessonFiles().add(new LessonFile(lesson, video, LessonFileType.VIDEO, VIDEO_SORT));
-        }
 
         Lesson saved = lessonRepository.save(lesson);
-        log.info("Created lesson id={} in course id={} (document id={}, video file={})",
-                saved.getId(), courseId, document.getId(), withVideo);
+        log.info("Created lesson id={} in course id={} (document id={})", saved.getId(), courseId,
+                document.getId());
         return courseMapper.toResponse(saved);
     }
 
@@ -89,12 +79,8 @@ public class LessonServiceImpl implements LessonService {
             throw new BusinessException(ErrorCode.LESSON_SORT_ORDER_EXISTS);
         }
         boolean newDocument = hasContent(request.getDocumentFile());
-        boolean newVideo = hasContent(request.getVideoFile());
         if (newDocument) {
             fileStorageService.validate(request.getDocumentFile(), FileCategory.DOCUMENT);
-        }
-        if (newVideo) {
-            fileStorageService.validate(request.getVideoFile(), FileCategory.VIDEO);
         }
 
         lesson.setTitle(request.getTitle().trim());
@@ -107,17 +93,13 @@ public class LessonServiceImpl implements LessonService {
             replaceFile(lesson, document, LessonFileType.DOCUMENT, DOCUMENT_SORT);
             lesson.setDocumentUrl(FileStorageService.downloadUrl(document.getId()));
         }
-        if (newVideo) {
-            StoredFile video = fileStorageService.store(request.getVideoFile(), FileCategory.VIDEO, UPLOAD_FOLDER);
-            replaceFile(lesson, video, LessonFileType.VIDEO, VIDEO_SORT);
-        } else if (request.isRemoveVideo()) {
+        if (request.isRemoveVideo()) {
             // Unlinks only; the file itself is kept like every replaced file.
             lesson.getLessonFiles().removeIf(link -> link.getFileType() == LessonFileType.VIDEO);
         }
 
         Lesson saved = lessonRepository.saveAndFlush(lesson);
-        log.info("Updated lesson id={} in course id={} (new document={}, new video={})",
-                lessonId, courseId, newDocument, newVideo);
+        log.info("Updated lesson id={} in course id={} (new document={})", lessonId, courseId, newDocument);
         return courseMapper.toResponse(saved);
     }
 

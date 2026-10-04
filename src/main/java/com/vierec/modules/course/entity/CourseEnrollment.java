@@ -56,11 +56,23 @@ public class CourseEnrollment implements Serializable {
     private Course course;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, columnDefinition = "enum('ENROLLED','COMPLETED','CANCELLED')")
-    private EnrollmentStatus status = EnrollmentStatus.ENROLLED;
+    @Column(name = "status", nullable = false, columnDefinition = "enum('PENDING','ENROLLED','COMPLETED','CANCELLED')")
+    private EnrollmentStatus status = EnrollmentStatus.PENDING;
 
+    /**
+     * Course price when the learner asked to join, i.e. the amount they were told to transfer. Kept so that
+     * revenue does not change when the course price does.
+     */
+    @Column(name = "price", nullable = false)
+    private Long price = 0L;
+
+    /** When an admin let the learner in (PENDING → ENROLLED); revenue is counted by this date. */
+    @Column(name = "approved_at")
+    private LocalDateTime approvedAt;
+
+    /** Reset by the service when a cancelled enrollment is taken up again. */
     @CreatedDate
-    @Column(name = "enrolled_at", nullable = false, updatable = false)
+    @Column(name = "enrolled_at", nullable = false)
     private LocalDateTime enrolledAt;
 
     /** Set by the service when {@link #status} becomes {@link EnrollmentStatus#COMPLETED}. */

@@ -1,6 +1,8 @@
 package com.vierec.modules.course.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.vierec.modules.course.entity.CourseStatus;
+import com.vierec.modules.course.entity.EnrollmentStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -30,6 +32,9 @@ public class CourseResponse implements Serializable {
 
     private String description;
 
+    @Schema(description = "Học phí (VND)", example = "100000")
+    private Long price;
+
     @Schema(example = "PUBLISHED")
     private CourseStatus status;
 
@@ -47,6 +52,12 @@ public class CourseResponse implements Serializable {
 
     @Schema(example = "3")
     private long lessonCount;
+
+    // Sent as null too (the app default drops nulls): the client branches on it.
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    @Schema(description = "Enrollment status of the caller; null when not enrolled or not logged in",
+            example = "ENROLLED")
+    private EnrollmentStatus myEnrollmentStatus;
 
     private LocalDateTime createdAt;
 

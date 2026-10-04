@@ -38,6 +38,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -62,6 +63,7 @@ class CourseApiTest {
 
     private static final String COURSES = "/api/v1/courses";
     private static final byte[] PDF = "%PDF-1.4 test document".getBytes(StandardCharsets.UTF_8);
+    private static final String YOUTUBE_URL = "https://youtu.be/dQw4w9WgXcQ";
     private static final byte[] MP4 = "0123456789abcdefghij".getBytes(StandardCharsets.UTF_8);
 
     @Autowired
@@ -98,7 +100,8 @@ class CourseApiTest {
 
     @AfterEach
     void cleanUp() {
-        for (String table : new String[] {"lesson_files", "files", "lessons", "courses", "user_roles", "users"}) {
+        for (String table : new String[] {"certificates", "course_enrollments", "lesson_files", "files", "lessons",
+                "courses", "user_roles", "users"}) {
             jdbcTemplate.update("DELETE FROM " + table);
         }
         FileSystemUtils.deleteRecursively(Paths.get(uploadDir).toFile());
@@ -192,7 +195,7 @@ class CourseApiTest {
         mockMvc.perform(post(COURSES).contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(course("A", CourseStatus.DRAFT))))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(multipart(COURSES + "/1/lessons").file(document("a.pdf")).file(video("b.mp4")))
+        mockMvc.perform(multipart(COURSES + "/1/lessons").file(document("a.pdf")))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -206,6 +209,7 @@ class CourseApiTest {
                 .andExpect(jsonPath("$.data.id").isNumber())
                 .andExpect(jsonPath("$.data.name").value("Phòng cháy"))
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.price").value(150_000))
                 .andExpect(jsonPath("$.data.instructorUsername").value("giangvien"))
                 .andExpect(jsonPath("$.data.createdByUsername").value("quantri"))
                 .andExpect(jsonPath("$.data.createdAt").isNotEmpty());
@@ -221,7 +225,7 @@ class CourseApiTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VRC-400-001"))
                 .andExpect(jsonPath("$.errors[*].field",
-                        containsInAnyOrder("name", "description", "instructorId", "status")));
+                        containsInAnyOrder("name", "description", "instructorId", "price", "status")));
 
         CourseRequest blank = course(" ", CourseStatus.DRAFT);
         blank.setDescription("   ");
@@ -239,6 +243,19 @@ class CourseApiTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[0].field").value("status"))
                 .andExpect(jsonPath("$.errors[0].message", containsString("PUBLISHED")));
+    }
+
+    @Test
+    void coursePriceMustBeAPositiveAmountOfDong() throws Exception {
+        CourseRequest request = course("A", CourseStatus.DRAFT);
+        request.setPrice(999L);
+        createCourse(request)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("price"));
+        request.setPrice(1_000_000_001L);
+        createCourse(request).andExpect(status().isBadRequest());
+        request.setPrice(1_000L);
+        createCourse(request).andExpect(status().isCreated());
     }
 
     @Test
@@ -261,7 +278,7 @@ class CourseApiTest {
     // ------------------------------------------------------------------ create lesson
 
     @Test
-    void createLessonStoresBothFilesOnServerAndLinksThem() throws Exception {
+    void createLessonStoresTheDocumentOnServerAndKeepsTheYoutubeLink() throws Exception {
         long courseId = createdCourseId("Khoá");
 
         String body = createLesson(courseId, 1)
@@ -269,13 +286,12 @@ class CourseApiTest {
                 .andExpect(jsonPath("$.data.courseId").value(courseId))
                 .andExpect(jsonPath("$.data.title").value("Bài 1"))
                 .andExpect(jsonPath("$.data.sortOrder").value(1))
-                .andExpect(jsonPath("$.data.files", hasSize(2)))
+                .andExpect(jsonPath("$.data.files", hasSize(1)))
                 .andExpect(jsonPath("$.data.files[0].fileType").value("DOCUMENT"))
                 .andExpect(jsonPath("$.data.files[0].originalName").value("tai-lieu.pdf"))
                 .andExpect(jsonPath("$.data.files[0].contentType").value("application/pdf"))
                 .andExpect(jsonPath("$.data.files[0].sizeBytes").value(PDF.length))
-                .andExpect(jsonPath("$.data.files[1].fileType").value("VIDEO"))
-                .andExpect(jsonPath("$.data.files[1].contentType").value("video/mp4"))
+                .andExpect(jsonPath("$.data.videoUrl").value(YOUTUBE_URL))
                 .andReturn().getResponse().getContentAsString();
 
         JsonNode data = objectMapper.readTree(body).path("data");
@@ -290,7 +306,7 @@ class CourseApiTest {
             assertThat((String) row.get("url")).startsWith("lessons/").doesNotContain("tai-lieu");
         }
 
-        mockMvc.perform(get(documentUrl).cookie(trainee))
+        mockMvc.perform(get(documentUrl).cookie(admin))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType("application/pdf"))
                 .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("tai-lieu.pdf")))
@@ -298,12 +314,12 @@ class CourseApiTest {
     }
 
     @Test
-    void videoCanBeStreamedWithRangeRequests() throws Exception {
+    void videoUploadedBeforeYoutubeOnlyCanStillBeStreamedWithRangeRequests() throws Exception {
         long courseId = createdCourseId("Khoá");
-        String body = createLesson(courseId, 1).andReturn().getResponse().getContentAsString();
-        String videoUrl = objectMapper.readTree(body).path("data").path("files").get(1).path("url").asText();
+        long lessonId = lessonData(createLesson(courseId, 1)).path("id").asLong();
+        String videoUrl = legacyVideo(lessonId);
 
-        mockMvc.perform(get(videoUrl).cookie(trainee).header(HttpHeaders.RANGE, "bytes=0-4"))
+        mockMvc.perform(get(videoUrl).cookie(admin).header(HttpHeaders.RANGE, "bytes=0-4"))
                 .andExpect(status().isPartialContent())
                 .andExpect(content().bytes("01234".getBytes(StandardCharsets.UTF_8)));
         mockMvc.perform(get(videoUrl)).andExpect(status().isUnauthorized());
@@ -321,13 +337,12 @@ class CourseApiTest {
 
         // An empty file input still sends a part; it counts as missing.
         mockMvc.perform(lessonForm(courseId, "1")
-                        .file(new MockMultipartFile("documentFile", "rong.pdf", "application/pdf", new byte[0]))
-                        .file(video("bai.mp4")))
+                        .file(new MockMultipartFile("documentFile", "rong.pdf", "application/pdf", new byte[0])))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[0].field").value("documentFile"))
                 .andExpect(jsonPath("$.errors[0].rejectedValue").value("rong.pdf"));
 
-        mockMvc.perform(lessonForm(courseId, "abc").file(document("a.pdf")).file(video("b.mp4")))
+        mockMvc.perform(lessonForm(courseId, "abc").file(document("a.pdf")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[0].field").value("sortOrder"))
                 .andExpect(jsonPath("$.errors[0].message").value("Invalid value"));
@@ -336,7 +351,7 @@ class CourseApiTest {
     }
 
     @Test
-    void videoIsOptionalAndMayBeALinkToAnotherSystem() throws Exception {
+    void videoIsAnOptionalYoutubeLinkAndUploadsAreIgnored() throws Exception {
         long courseId = createdCourseId("Khoá");
 
         mockMvc.perform(lessonForm(courseId, "1").file(document("a.pdf")))
@@ -345,29 +360,65 @@ class CourseApiTest {
                 .andExpect(jsonPath("$.data.files[0].fileType").value("DOCUMENT"))
                 .andExpect(jsonPath("$.data.videoUrl").doesNotExist());
 
+        // A video file part from an old client is not a field any more: it is ignored, nothing is stored.
         mockMvc.perform(lessonForm(courseId, "2").file(document("a.pdf"))
-                        .param("videoUrl", "  https://youtu.be/abc123  "))
+                        .file(new MockMultipartFile("videoFile", "b.mp4", "video/mp4", MP4))
+                        .param("videoUrl", "  " + YOUTUBE_URL + "  "))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.files", hasSize(1)))
-                .andExpect(jsonPath("$.data.videoUrl").value("https://youtu.be/abc123"));
-
-        mockMvc.perform(lessonForm(courseId, "3").file(document("a.pdf")).file(video("b.mp4"))
-                        .param("videoUrl", "https://drive.google.com/file/d/xyz/view"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.files", hasSize(2)))
-                .andExpect(jsonPath("$.data.videoUrl").value("https://drive.google.com/file/d/xyz/view"));
+                .andExpect(jsonPath("$.data.videoUrl").value(YOUTUBE_URL));
 
         assertThat(jdbcTemplate.queryForList("SELECT video_url FROM lessons ORDER BY sort_order", String.class))
-                .containsExactly(null, "https://youtu.be/abc123", "https://drive.google.com/file/d/xyz/view");
-        mockMvc.perform(get(COURSES + "/" + courseId))
-                .andExpect(jsonPath("$.data.lessons[1].videoUrl").value("https://youtu.be/abc123"));
+                .containsExactly(null, YOUTUBE_URL);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM files", Long.class)).isEqualTo(2);
+        mockMvc.perform(get(COURSES + "/" + courseId).cookie(admin))
+                .andExpect(jsonPath("$.data.lessons[1].videoUrl").value(YOUTUBE_URL));
     }
 
     @Test
-    void videoUrlMustBeAnHttpLink() throws Exception {
+    void lessonVideosAndFilesOpenOnlyAfterTheEnrollmentIsApproved() throws Exception {
         long courseId = createdCourseId("Khoá");
-        for (String bad : new String[] {"youtu.be/abc", "javascript:alert(1)", "https://a b.com",
-                "ftp://host/video.mp4"}) {
+        JsonNode lesson = lessonData(mockMvc.perform(lessonForm(courseId, "1").file(document("tai-lieu.pdf"))
+                .param("videoUrl", YOUTUBE_URL)));
+        String fileUrl = lesson.path("files").get(0).path("url").asText();
+        String detail = COURSES + "/" + courseId;
+
+        // Visitors only get the outline.
+        mockMvc.perform(get(detail))
+                .andExpect(jsonPath("$.data.lessons[0].title").value("Bài 1"))
+                .andExpect(jsonPath("$.data.lessons[0].videoUrl").doesNotExist())
+                .andExpect(jsonPath("$.data.lessons[0].documentUrl").doesNotExist())
+                .andExpect(jsonPath("$.data.lessons[0].files", hasSize(0)));
+
+        // So do learners whose payment is not approved yet.
+        String body = mockMvc.perform(post(detail + "/enrollments").cookie(trainee))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andReturn().getResponse().getContentAsString();
+        long enrollmentId = objectMapper.readTree(body).path("data").path("id").asLong();
+        mockMvc.perform(get(detail).cookie(trainee))
+                .andExpect(jsonPath("$.data.myEnrollmentStatus").value("PENDING"))
+                .andExpect(jsonPath("$.data.lessons[0].videoUrl").doesNotExist())
+                .andExpect(jsonPath("$.data.lessons[0].files", hasSize(0)));
+        mockMvc.perform(get(fileUrl).cookie(trainee))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("VRC-403-002"));
+
+        mockMvc.perform(put(detail + "/enrollments/" + enrollmentId).cookie(admin)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"ENROLLED\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(detail).cookie(trainee))
+                .andExpect(jsonPath("$.data.lessons[0].videoUrl").value(YOUTUBE_URL))
+                .andExpect(jsonPath("$.data.lessons[0].files", hasSize(1)));
+        mockMvc.perform(get(fileUrl).cookie(trainee)).andExpect(status().isOk());
+    }
+
+    @Test
+    void videoUrlMustBeAYoutubeLink() throws Exception {
+        long courseId = createdCourseId("Khoá");
+        for (String bad : new String[] {"youtu.be/dQw4w9WgXcQ", "javascript:alert(1)", "https://a b.com",
+                "https://drive.google.com/file/d/xyz/view", "https://www.youtube.com/watch?v=ngan",
+                "https://vimeo.com/123456"}) {
             mockMvc.perform(lessonForm(courseId, "1").file(document("a.pdf")).param("videoUrl", bad))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.errors[0].field").value("videoUrl"));
@@ -382,14 +433,13 @@ class CourseApiTest {
     void createLessonRejectsWrongFileTypesWithoutStoringAnything() throws Exception {
         long courseId = createdCourseId("Khoá");
 
-        // A video in the document slot, and a document in the video slot.
-        mockMvc.perform(lessonForm(courseId, "1").file(document("bai.mp4")).file(video("bai.mp4")))
+        mockMvc.perform(lessonForm(courseId, "1").file(document("bai.mp4")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VRC-400-301"));
-        mockMvc.perform(lessonForm(courseId, "1").file(document("bai.pdf")).file(video("bai.exe")))
+        mockMvc.perform(lessonForm(courseId, "1").file(document("bai.exe")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VRC-400-301"))
-                .andExpect(jsonPath("$.message", containsString("mp4")));
+                .andExpect(jsonPath("$.message", containsString("pdf")));
 
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM files", Long.class)).isZero();
         assertThat(Paths.get(uploadDir)).doesNotExist();
@@ -403,8 +453,8 @@ class CourseApiTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("VRC-409-201"));
 
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM files", Long.class)).isEqualTo(2);
-        assertThat(storedFileCount()).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM files", Long.class)).isEqualTo(1);
+        assertThat(storedFileCount()).isEqualTo(1);
     }
 
     @Test
@@ -424,7 +474,7 @@ class CourseApiTest {
         createLesson(999_999L, 1).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("VRC-404-201"));
 
         long courseId = createdCourseId("Khoá");
-        mockMvc.perform(multipart(COURSES + "/" + courseId + "/lessons").file(document("a.pdf")).file(video("b.mp4"))
+        mockMvc.perform(multipart(COURSES + "/" + courseId + "/lessons").file(document("a.pdf"))
                         .param("title", "T").param("instructions", "I").param("sortOrder", "1").cookie(trainee))
                 .andExpect(status().isForbidden());
     }
@@ -446,6 +496,10 @@ class CourseApiTest {
 
         mockMvc.perform(get(COURSES + "/" + courseId))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.lessons", hasSize(2)))
+                .andExpect(jsonPath("$.data.lessons[0].sortOrder").value(1));
+        mockMvc.perform(get(COURSES + "/" + courseId).cookie(admin))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(courseId))
                 .andExpect(jsonPath("$.data.name").value("Khoá"))
                 .andExpect(jsonPath("$.data.instructorName").value("Họ giangvien"))
@@ -453,9 +507,9 @@ class CourseApiTest {
                 .andExpect(jsonPath("$.data.lessons", hasSize(2)))
                 .andExpect(jsonPath("$.data.lessons[0].sortOrder").value(1))
                 .andExpect(jsonPath("$.data.lessons[1].sortOrder").value(2))
-                .andExpect(jsonPath("$.data.lessons[0].files", hasSize(2)))
+                .andExpect(jsonPath("$.data.lessons[0].files", hasSize(1)))
                 .andExpect(jsonPath("$.data.lessons[0].files[0].fileType").value("DOCUMENT"))
-                .andExpect(jsonPath("$.data.lessons[0].files[1].fileType").value("VIDEO"));
+                .andExpect(jsonPath("$.data.lessons[0].videoUrl").value(YOUTUBE_URL));
     }
 
     @Test
@@ -481,18 +535,21 @@ class CourseApiTest {
         CourseRequest request = course("  Mới  ", CourseStatus.ARCHIVED);
         request.setDescription("Mô tả mới");
         request.setInstructorId(otherInstructor);
+        request.setPrice(2_500_000L);
 
         updateCourse(courseId, request)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("Mới"))
                 .andExpect(jsonPath("$.data.description").value("Mô tả mới"))
                 .andExpect(jsonPath("$.data.status").value("ARCHIVED"))
+                .andExpect(jsonPath("$.data.price").value(2_500_000))
                 .andExpect(jsonPath("$.data.instructorUsername").value("giangvien2"))
                 .andExpect(jsonPath("$.data.createdByUsername").value("quantri"));
 
         Map<String, Object> row = jdbcTemplate.queryForMap("SELECT * FROM courses WHERE id = ?", courseId);
         assertThat(row.get("name")).isEqualTo("Mới");
         assertThat(row.get("instructor_id")).isEqualTo(otherInstructor);
+        assertThat(((Number) row.get("price")).longValue()).isEqualTo(2_500_000L);
     }
 
     @Test
@@ -502,7 +559,7 @@ class CourseApiTest {
                         .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[*].field",
-                        containsInAnyOrder("name", "description", "instructorId", "status")));
+                        containsInAnyOrder("name", "description", "instructorId", "price", "status")));
         updateCourse(999_999L, course("A", CourseStatus.DRAFT))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("VRC-404-201"));
     }
@@ -557,7 +614,7 @@ class CourseApiTest {
         JsonNode created = lessonData(createLesson(courseId, 1));
 
         String body = mockMvc.perform(lessonUpdate(courseId, created.path("id").asLong(), "5")
-                        .file(new MockMultipartFile("videoFile", "", "application/octet-stream", new byte[0])))
+                        .file(new MockMultipartFile("documentFile", "", "application/octet-stream", new byte[0])))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("Sửa 5"))
                 .andExpect(jsonPath("$.data.instructions").value("Hướng dẫn mới"))
@@ -570,45 +627,35 @@ class CourseApiTest {
     }
 
     @Test
-    void updateLessonReplacesOnlyTheUploadedFile() throws Exception {
+    void updateLessonReplacesTheDocumentAndKeepsTheOldFile() throws Exception {
         long courseId = createdCourseId("Khoá");
         JsonNode created = lessonData(createLesson(courseId, 1));
         long lessonId = created.path("id").asLong();
 
-        String body = mockMvc.perform(lessonUpdate(courseId, lessonId, "1")
-                        .file(new MockMultipartFile("videoFile", "moi.webm", "video/webm", MP4)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.files", hasSize(2)))
-                .andExpect(jsonPath("$.data.files[1].fileType").value("VIDEO"))
-                .andExpect(jsonPath("$.data.files[1].originalName").value("moi.webm"))
-                .andExpect(jsonPath("$.data.files[1].contentType").value("video/webm"))
-                .andReturn().getResponse().getContentAsString();
-
-        JsonNode updated = objectMapper.readTree(body).path("data");
-        assertThat(updated.path("files").get(0)).isEqualTo(created.path("files").get(0));
-        assertThat(updated.path("files").get(1).path("fileId"))
-                .isNotEqualTo(created.path("files").get(1).path("fileId"));
-        // The replaced video is unlinked but kept, on disk and in files.
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM lesson_files", Long.class)).isEqualTo(2);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM files", Long.class)).isEqualTo(3);
-        assertThat(storedFileCount()).isEqualTo(3);
-
         String withDocument = mockMvc.perform(lessonUpdate(courseId, lessonId, "1").file(document("moi.docx")))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.files", hasSize(1)))
                 .andExpect(jsonPath("$.data.files[0].originalName").value("moi.docx"))
                 .andReturn().getResponse().getContentAsString();
         JsonNode data = objectMapper.readTree(withDocument).path("data");
         assertThat(data.path("documentUrl").asText()).isEqualTo(data.path("files").get(0).path("url").asText());
+        assertThat(data.path("files").get(0).path("fileId"))
+                .isNotEqualTo(created.path("files").get(0).path("fileId"));
+        // The replaced document is unlinked but kept, on disk and in files.
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM lesson_files", Long.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM files", Long.class)).isEqualTo(2);
+        assertThat(storedFileCount()).isEqualTo(2);
     }
 
     @Test
-    void updateLessonReplacesTheVideoLinkAndCanRemoveTheVideoFile() throws Exception {
+    void updateLessonReplacesTheVideoLinkAndCanRemoveAnOldVideoFile() throws Exception {
         long courseId = createdCourseId("Khoá");
         long lessonId = lessonData(createLesson(courseId, 1)).path("id").asLong();
+        legacyVideo(lessonId);
 
-        mockMvc.perform(lessonUpdate(courseId, lessonId, "1").param("videoUrl", "https://youtu.be/moi"))
+        mockMvc.perform(lessonUpdate(courseId, lessonId, "1").param("videoUrl", "https://youtu.be/aaaaaaaaaaa"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.videoUrl").value("https://youtu.be/moi"))
+                .andExpect(jsonPath("$.data.videoUrl").value("https://youtu.be/aaaaaaaaaaa"))
                 .andExpect(jsonPath("$.data.files", hasSize(2)));
 
         // Leaving videoUrl out clears it; removeVideo unlinks the uploaded video but keeps the file.
@@ -619,12 +666,6 @@ class CourseApiTest {
                 .andExpect(jsonPath("$.data.files[0].fileType").value("DOCUMENT"));
         assertThat(jdbcTemplate.queryForObject("SELECT video_url FROM lessons", String.class)).isNull();
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM files", Long.class)).isEqualTo(2);
-
-        // A new video file wins over removeVideo.
-        mockMvc.perform(lessonUpdate(courseId, lessonId, "1").file(video("lai.mp4")).param("removeVideo", "true"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.files", hasSize(2)))
-                .andExpect(jsonPath("$.data.files[1].originalName").value("lai.mp4"));
     }
 
     @Test
@@ -635,12 +676,12 @@ class CourseApiTest {
 
         mockMvc.perform(lessonUpdate(courseId, lessonId, "2"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("VRC-409-201"));
-        mockMvc.perform(lessonUpdate(courseId, lessonId, "1").file(video("sai.exe")))
+        mockMvc.perform(lessonUpdate(courseId, lessonId, "1").file(document("sai.exe")))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VRC-400-301"));
         mockMvc.perform(multipart(HttpMethod.PUT, COURSES + "/" + courseId + "/lessons/" + lessonId).cookie(admin))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[*].field", containsInAnyOrder("title", "instructions", "sortOrder")));
-        assertThat(storedFileCount()).isEqualTo(4);
+        assertThat(storedFileCount()).isEqualTo(2);
     }
 
     @Test
@@ -669,7 +710,7 @@ class CourseApiTest {
 
         assertThat(jdbcTemplate.queryForObject("SELECT deleted_at FROM lessons WHERE id = ?", Object.class, lessonId))
                 .isNotNull();
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM lesson_files", Long.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM lesson_files", Long.class)).isEqualTo(1);
         mockMvc.perform(get(COURSES + "/" + courseId)).andExpect(jsonPath("$.data.lessons", hasSize(0)));
         mockMvc.perform(get(COURSES).cookie(admin)).andExpect(jsonPath("$.data.content[0].lessonCount").value(0));
         mockMvc.perform(delete(COURSES + "/" + courseId + "/lessons/" + lessonId).cookie(admin))
@@ -718,7 +759,7 @@ class CourseApiTest {
 
     private CourseRequest course(String name, CourseStatus status) {
         return CourseRequest.builder().name(name).description("Mô tả " + name)
-                .instructorId(instructorId).status(status).build();
+                .instructorId(instructorId).price(150_000L).status(status).build();
     }
 
     private ResultActions createCourse(CourseRequest request) throws Exception {
@@ -734,7 +775,7 @@ class CourseApiTest {
 
     private ResultActions createLesson(long courseId, int sortOrder) throws Exception {
         return mockMvc.perform(lessonForm(courseId, String.valueOf(sortOrder))
-                .file(document("tai-lieu.pdf")).file(video("video.mp4")));
+                .file(document("tai-lieu.pdf")).param("videoUrl", YOUTUBE_URL));
     }
 
     private ResultActions updateCourse(long courseId, CourseRequest request) throws Exception {
@@ -782,7 +823,16 @@ class CourseApiTest {
         return new MockMultipartFile("documentFile", name, "application/pdf", PDF);
     }
 
-    private static MockMultipartFile video(String name) {
-        return new MockMultipartFile("videoFile", name, "video/mp4", MP4);
+    /** A video file linked the way lessons had them before videos became YouTube only; returns its URL. */
+    private String legacyVideo(long lessonId) throws Exception {
+        Path stored = Paths.get(uploadDir).resolve("lessons/cu.mp4");
+        Files.createDirectories(stored.getParent());
+        Files.write(stored, MP4);
+        jdbcTemplate.update("INSERT INTO files (url, original_name, content_type, size_bytes, created_at) "
+                + "VALUES ('lessons/cu.mp4', 'cu.mp4', 'video/mp4', ?, ?)", MP4.length, LocalDateTime.now());
+        long fileId = jdbcTemplate.queryForObject("SELECT id FROM files WHERE url = 'lessons/cu.mp4'", Long.class);
+        jdbcTemplate.update("INSERT INTO lesson_files (lesson_id, file_id, file_type, sort_order) "
+                + "VALUES (?, ?, 'VIDEO', 2)", lessonId, fileId);
+        return "/api/v1/files/" + fileId;
     }
 }

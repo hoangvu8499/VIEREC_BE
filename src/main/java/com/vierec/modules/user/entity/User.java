@@ -1,6 +1,7 @@
 package com.vierec.modules.user.entity;
 
 import com.vierec.domain.BaseEntity;
+import com.vierec.modules.business.entity.Business;
 import com.vierec.modules.role.entity.Role;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -19,6 +20,8 @@ import javax.persistence.FetchType;
 import javax.persistence.GeneratedValue;
 import javax.persistence.GenerationType;
 import javax.persistence.Id;
+import javax.persistence.JoinColumn;
+import javax.persistence.ManyToOne;
 import javax.persistence.OneToMany;
 import javax.persistence.Table;
 import java.time.LocalDate;
@@ -83,10 +86,28 @@ public class User extends BaseEntity {
     @Builder.Default
     private UserStatus status = UserStatus.ACTIVE;
 
+    /** Wrong passwords in a row; reset by a successful login, an admin unlock or a password reset. */
+    @Column(name = "failed_login_count", nullable = false)
+    @Builder.Default
+    private int failedLoginCount = 0;
+
+    @Column(name = "last_failed_login_at")
+    private LocalDateTime lastFailedLoginAt;
+
+    /** Created with a default password (business import): the user must choose their own after logging in. */
+    @Column(name = "must_change_password", nullable = false)
+    @Builder.Default
+    private boolean mustChangePassword = false;
+
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
-    @OneToMany(mappedBy = "user", fetch = FetchType.EAGER, cascade = CascadeType.ALL, orphanRemoval = true)
+    /** Business the user learns for (TRAINEE) or manages (BUSINESS); null for an independent learner. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "business_id")
+    private Business business;
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private Set<UserRole> userRoles = new HashSet<>();
 
@@ -96,6 +117,10 @@ public class User extends BaseEntity {
 
     public Set<Role> getRoles() {
         return userRoles.stream().map(UserRole::getRole).collect(Collectors.toSet());
+    }
+
+    public boolean hasRole(String code) {
+        return userRoles.stream().anyMatch(userRole -> code.equals(userRole.getRole().getCode()));
     }
 
     public boolean isActive() {

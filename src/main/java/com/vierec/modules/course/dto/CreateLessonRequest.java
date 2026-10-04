@@ -1,6 +1,7 @@
 package com.vierec.modules.course.dto;
 
 import com.vierec.common.validation.RequiredFile;
+import com.vierec.modules.course.validation.YoutubeUrl;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -11,14 +12,12 @@ import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Pattern;
 import javax.validation.constraints.Size;
 
 /**
  * Multipart form of {@code POST /api/v1/courses/{courseId}/lessons}. Title, instructions, sort order and the
  * document are required; the document goes to {@code lessons.document_url} and {@code lesson_files}.
- * The video is optional: an uploaded file ({@code lesson_files}), a link to another system
- * ({@code lessons.video_url}), both or neither.
+ * The video is optional and is a YouTube link ({@code lessons.video_url}).
  */
 @Getter
 @Setter
@@ -28,8 +27,6 @@ public class CreateLessonRequest {
 
     /** Length of {@code lessons.video_url}. */
     public static final int VIDEO_URL_MAX = 2048;
-    /** Absolute http(s) link without whitespace; blank is allowed and means "no link". */
-    public static final String VIDEO_URL_PATTERN = "^\\s*((?i)https?://\\S+)?\\s*$";
 
     @NotBlank(message = "{lesson.title.required}")
     @Size(max = 200, message = "{lesson.title.size}")
@@ -51,11 +48,8 @@ public class CreateLessonRequest {
     @Schema(description = "Document: pdf, doc, docx, ppt, pptx, xls, xlsx, txt", type = "string", format = "binary")
     private MultipartFile documentFile;
 
-    @Schema(description = "Optional video: mp4, webm, mov, mkv", type = "string", format = "binary")
-    private MultipartFile videoFile;
-
     @Size(max = VIDEO_URL_MAX, message = "{lesson.videoUrl.size}")
-    @Pattern(regexp = VIDEO_URL_PATTERN, message = "{lesson.videoUrl.pattern}")
-    @Schema(description = "Optional link to a video on another system", example = "https://youtu.be/abc123")
+    @YoutubeUrl
+    @Schema(description = "Optional YouTube link of the lecture video", example = "https://youtu.be/dQw4w9WgXcQ")
     private String videoUrl;
 }
