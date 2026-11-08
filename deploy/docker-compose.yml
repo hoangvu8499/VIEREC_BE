@@ -1,0 +1,98 @@
+# Production stack for one VPS: nginx (HTTPS + FE static files) -> Spring Boot -> MySQL.
+# Only nginx publishes ports; MySQL and the API are reachable inside the Docker network only.
+name: vierec
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: vierec
+      MYSQL_USER: ${DB_USERNAME:-vierec}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # ",z": SELinux label so the container may read the file on AlmaLinux/Rocky/CentOS hosts.
+      - ./mysql/my.cnf:/etc/mysql/conf.d/vierec.cnf:ro,z
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 1g
+    logging: *logging
+
+  app:
+    build: ..
+    image: vierec-be:latest
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      JAVA_OPTS: "-Xms256m -Xmx1g -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -Xss512k"
+      DB_URL: "jdbc:mysql://mysql:3306/vierec?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Ho_Chi_Minh&allowPublicKeyRetrieval=true&useSSL=false"
+      DB_USERNAME: ${DB_USERNAME:-vierec}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_POOL_MAX: 10
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      COOKIE_SECURE: "true"
+      CORS_ORIGINS: https://${DOMAIN:?set DOMAIN in .env}
+      FRONTEND_URL: https://${DOMAIN}
+      UPLOAD_DIR: /app/uploads
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-VIEREC Academy <no-reply@vierec.vn>}
+    volumes:
+      - uploads:/app/uploads
+    mem_limit: 1536m
+    logging: *logging
+
+  web:
+    build:
+      # FE repo is cloned next to this repo: <project dir>/VIEREC_BE and <project dir>/VIEREC-_FE
+      context: ../../VIEREC-_FE
+      dockerfile: ../VIEREC_BE/deploy/web/web.Dockerfile
+    image: vierec-web:latest
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./web/nginx.conf:/etc/nginx/conf.d/vierec.conf:ro,z
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot:ro
+    # Reload every 12h so certificates renewed by certbot are picked up.
+    command: ["/bin/sh", "-c", "while :; do sleep 12h; nginx -s reload; done & exec nginx -g 'daemon off;'"]
+    mem_limit: 128m
+    logging: *logging
+
+  # Renews the Let's Encrypt certificate (webroot challenge served by nginx). First issue: ./vierec.sh cert
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    mem_limit: 128m
+    logging: *logging
+
+volumes:
+  mysql-data:
+  uploads:
+  letsencrypt:
+  certbot-www:
