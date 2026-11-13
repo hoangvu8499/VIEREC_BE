@@ -3,12 +3,15 @@ package com.vierec.modules.business.service.impl;
 import com.vierec.common.dto.PageResponse;
 import com.vierec.common.exception.BusinessException;
 import com.vierec.common.exception.ErrorCode;
+import com.vierec.common.exception.ErrorResponse;
 import com.vierec.common.exception.ResourceNotFoundException;
 import com.vierec.modules.auth.dto.RegisterRequest;
 import com.vierec.modules.business.dto.BusinessEnrollRequest;
 import com.vierec.modules.business.dto.BusinessEnrollResponse;
 import com.vierec.modules.business.dto.BusinessManagerRequest;
 import com.vierec.modules.business.dto.BusinessMemberDetailResponse;
+import com.vierec.modules.business.dto.BusinessMemberImportRequest;
+import com.vierec.modules.business.dto.BusinessMemberImportResponse;
 import com.vierec.modules.business.dto.BusinessMemberResponse;
 import com.vierec.modules.business.dto.BusinessRequest;
 import com.vierec.modules.business.dto.BusinessResponse;
@@ -18,6 +21,7 @@ import com.vierec.modules.business.entity.Business;
 import com.vierec.modules.business.entity.BusinessStatus;
 import com.vierec.modules.business.mapper.BusinessMapper;
 import com.vierec.modules.business.repository.BusinessRepository;
+import com.vierec.modules.business.service.BusinessMemberWorkbook;
 import com.vierec.modules.business.service.BusinessService;
 import com.vierec.modules.certificate.entity.Certificate;
 import com.vierec.modules.certificate.dto.CertificateResponse;
@@ -57,9 +61,11 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -71,6 +77,8 @@ public class BusinessServiceImpl implements BusinessService {
 
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
     private static final Sort LATEST_CERTIFICATE_FIRST = Sort.by(Sort.Order.desc("issuedAt"), Sort.Order.desc("id"));
+    private static final String TAKEN = "An account already uses this value";
+    private static final String TAKEN_AS_USERNAME = "Another account already uses this CCCD as its username";
 
     private final BusinessRepository businessRepository;
     private final UserRepository userRepository;
@@ -81,6 +89,7 @@ public class BusinessServiceImpl implements BusinessService {
     private final UserService userService;
     private final EnrollmentService enrollmentService;
     private final LearningProgressService progressService;
+    private final BusinessMemberWorkbook memberWorkbook;
     private final BusinessMapper businessMapper;
     private final CertificateMapper certificateMapper;
     private final UserMapper userMapper;
@@ -183,6 +192,96 @@ public class BusinessServiceImpl implements BusinessService {
         Business business = managedBusiness(username);
         User member = userService.createBusinessAccount(request, RoleCode.TRAINEE, business, username);
         return businessMapper.toMember(member);
+    }
+
+    @Override
+    @Transactional
+    public BusinessMemberImportResponse importMembers(String username, BusinessMemberImportRequest request) {
+        Business business = managedBusiness(username);
+        // Rejects the file on a bad cell or a value repeated inside it; nothing has been written yet.
+        List<BusinessMemberWorkbook.ParsedMember> rows =
+                memberWorkbook.read(request.getFile(), request.getDefaultPassword());
+        checkNotTakenYet(rows);
+
+        List<RegisterRequest> requests = new ArrayList<>(rows.size());
+        for (BusinessMemberWorkbook.ParsedMember row : rows) {
+            requests.add(row.getRequest());
+        }
+        List<User> created = userService.createBusinessAccounts(requests, RoleCode.TRAINEE, business, username, true);
+        log.info("Business id={} imported {} learner accounts", business.getId(), created.size());
+        return BusinessMemberImportResponse.builder()
+                .importedCount(created.size())
+                .members(created.stream().map(businessMapper::toMember).collect(Collectors.toList()))
+                .build();
+    }
+
+    /**
+     * Rejects the file when a username, CCCD, phone or email of it already belongs to an account, soft-deleted
+     * ones included: those rows still hold the unique values. Four queries for the whole file, not four per row,
+     * and every clash is reported with the Excel row that carries it.
+     */
+    private void checkNotTakenYet(List<BusinessMemberWorkbook.ParsedMember> rows) {
+        Map<String, Integer> usernames = new LinkedHashMap<>();
+        Map<String, Integer> cccds = new LinkedHashMap<>();
+        Map<String, Integer> phones = new LinkedHashMap<>();
+        Map<String, Integer> emails = new LinkedHashMap<>();
+        for (BusinessMemberWorkbook.ParsedMember row : rows) {
+            RegisterRequest request = row.getRequest();
+            usernames.put(lower(request.getUsername()), row.getExcelRow());
+            cccds.put(lower(request.getCccd()), row.getExcelRow());
+            phones.put(lower(request.getPhoneNumber()), row.getExcelRow());
+            emails.put(lower(request.getEmail()), row.getExcelRow());
+        }
+
+        // Sorted by Excel row so the manager reads the problems in the order of the sheet.
+        Map<Integer, List<ErrorResponse.FieldViolation>> byRow = new TreeMap<>();
+        addTaken(cccds, "cccd", TAKEN, userRepository::findTakenCccds, byRow);
+        // The username is the CCCD, so an account already named after it blocks the row too, on the CCCD column.
+        addTaken(usernames, "cccd", TAKEN_AS_USERNAME, userRepository::findTakenUsernames, byRow);
+        addTaken(phones, "phoneNumber", TAKEN, userRepository::findTakenPhoneNumbers, byRow);
+        addTaken(emails, "email", TAKEN, userRepository::findTakenEmails, byRow);
+        if (byRow.isEmpty()) {
+            return;
+        }
+        List<ErrorResponse.FieldViolation> violations = new ArrayList<>();
+        for (List<ErrorResponse.FieldViolation> ofRow : byRow.values()) {
+            violations.addAll(ofRow);
+        }
+        throw new BusinessException(ErrorCode.MEMBER_IMPORT_INVALID_ROWS, violations);
+    }
+
+    private static void addTaken(Map<String, Integer> rowByValue, String field, String message,
+                                 Function<Collection<String>, List<String>> lookup,
+                                 Map<Integer, List<ErrorResponse.FieldViolation>> byRow) {
+        if (rowByValue.isEmpty()) {
+            return;
+        }
+        for (String taken : lookup.apply(rowByValue.keySet())) {
+            // The column collates case-insensitively, so the stored spelling may differ from the file's.
+            Integer excelRow = rowByValue.get(lower(taken));
+            if (excelRow == null) {
+                continue;
+            }
+            List<ErrorResponse.FieldViolation> ofRow = byRow.get(excelRow);
+            if (ofRow == null) {
+                ofRow = new ArrayList<>();
+                byRow.put(excelRow, ofRow);
+            }
+            String path = "rows[" + excelRow + "]." + field;
+            // CCCD and username checks land on the same cell: report it once.
+            if (ofRow.stream().anyMatch(violation -> violation.getField().equals(path))) {
+                continue;
+            }
+            ofRow.add(ErrorResponse.FieldViolation.builder()
+                    .field(path)
+                    .rejectedValue(taken)
+                    .message(message)
+                    .build());
+        }
+    }
+
+    private static String lower(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     @Override

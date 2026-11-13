@@ -24,8 +24,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Certificate exam of a course ({@code exams}): at most one per course. The score is out of 10:
- * correct answers / number of questions x 10.
+ * Certificate exam of a course ({@code exams}): at most one per course. Its questions are a bank: each attempt
+ * draws {@link #questionsPerAttempt} of them at random. The score is out of 10: correct answers / questions on the
+ * paper x 10.
  */
 @Entity
 @Table(name = "exams", uniqueConstraints = @UniqueConstraint(name = "uk_exams_course", columnNames = "course_id"))
@@ -54,8 +55,17 @@ public class Exam extends BaseEntity {
     @Column(name = "pass_score", nullable = false, precision = 4, scale = 2)
     private BigDecimal passScore;
 
+    /** Questions on each learner's paper, drawn at random from {@link #questions}; {@code null} = all of them. */
+    @Column(name = "questions_per_attempt")
+    private Integer questionsPerAttempt;
+
     /** Removing a question from this list deletes its row. */
     @OneToMany(mappedBy = "exam", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sortOrder ASC, id ASC")
     private List<ExamQuestion> questions = new ArrayList<>();
+
+    /** Number of questions on a learner's paper. */
+    public int paperSize() {
+        return questionsPerAttempt != null ? questionsPerAttempt : questions.size();
+    }
 }

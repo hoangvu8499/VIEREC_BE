@@ -36,7 +36,7 @@ public class ExamAttemptResponse implements Serializable {
             + "instead of comparing deadlineAt with the device clock", example = "1795")
     private Long remainingSeconds;
 
-    @Schema(description = "Questions without their answer, in exam order (IN_PROGRESS only)")
+    @Schema(description = "The learner's paper without the answers, in the drawn order (IN_PROGRESS only)")
     private List<ExamPaperQuestionResponse> questions;
 
     @Schema(description = "Pass score at start time, out of 10", example = "5")

@@ -1,25 +1,39 @@
 package com.vierec.modules.supportpoint.service.impl;
 
+import com.vierec.common.dto.PageResponse;
 import com.vierec.common.exception.BusinessException;
 import com.vierec.common.exception.ErrorCode;
 import com.vierec.common.exception.ResourceNotFoundException;
 import com.vierec.modules.supportpoint.dto.NearbySupportPointsResponse;
+import com.vierec.modules.supportpoint.dto.SupportPointDetailResponse;
+import com.vierec.modules.supportpoint.dto.SupportPointImportResponse;
+import com.vierec.modules.supportpoint.dto.SupportPointRequest;
 import com.vierec.modules.supportpoint.dto.SupportPointResponse;
+import com.vierec.modules.supportpoint.entity.SupportPoint;
 import com.vierec.modules.supportpoint.mapper.SupportPointMapper;
 import com.vierec.modules.supportpoint.repository.SupportPointRepository;
 import com.vierec.modules.supportpoint.service.GeocodedPlace;
 import com.vierec.modules.supportpoint.service.GeocodingService;
 import com.vierec.modules.supportpoint.service.SupportPointService;
+import com.vierec.modules.supportpoint.service.SupportPointWorkbook;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -28,10 +42,14 @@ public class SupportPointServiceImpl implements SupportPointService {
     private static final double EARTH_RADIUS_KM = 6371.0;
     /** Kilometres per degree of latitude (and of longitude at the equator). */
     private static final double KM_PER_DEGREE = 111.32;
+    /** Scale of {@code support_points.latitude / longitude} (DECIMAL(10,7)). */
+    private static final int COORDINATE_SCALE = 7;
+    private static final Sort BY_AREA = Sort.by("province", "district", "name", "id");
 
     private final SupportPointRepository supportPointRepository;
     private final GeocodingService geocodingService;
     private final SupportPointMapper supportPointMapper;
+    private final SupportPointWorkbook workbook;
 
     @Override
     public NearbySupportPointsResponse nearby(String address, Double latitude, Double longitude, int radiusKm) {
@@ -56,6 +74,100 @@ public class SupportPointServiceImpl implements SupportPointService {
                 .radiusKm(radiusKm)
                 .results(results)
                 .build();
+    }
+
+    // ---------------------------------------------------------------- admin
+
+    @Override
+    public PageResponse<SupportPointDetailResponse> search(String keyword, int page, int size) {
+        String normalized = StringUtils.hasText(keyword) ? keyword.trim() : null;
+        return PageResponse.of(supportPointRepository.search(normalized, PageRequest.of(page, size, BY_AREA)),
+                supportPointMapper::toDetail);
+    }
+
+    @Override
+    public SupportPointDetailResponse get(Long id) {
+        return supportPointMapper.toDetail(find(id));
+    }
+
+    @Override
+    @Transactional
+    public SupportPointDetailResponse create(SupportPointRequest request) {
+        SupportPoint point = new SupportPoint();
+        apply(point, request, true);
+        SupportPoint saved = supportPointRepository.save(point);
+        log.info("Created support point id={}", saved.getId());
+        return supportPointMapper.toDetail(saved);
+    }
+
+    @Override
+    @Transactional
+    public SupportPointDetailResponse update(Long id, SupportPointRequest request) {
+        SupportPoint point = find(id);
+        apply(point, request, true);
+        supportPointRepository.flush();
+        return supportPointMapper.toDetail(point);
+    }
+
+    @Override
+    @Transactional
+    public void delete(Long id) {
+        find(id).setDeletedAt(LocalDateTime.now());
+        log.info("Soft-deleted support point id={}", id);
+    }
+
+    @Override
+    @Transactional
+    public SupportPointImportResponse importPoints(MultipartFile file) {
+        // Rejects the file on any bad cell; nothing has been written yet.
+        List<SupportPointWorkbook.ParsedPoint> rows = workbook.read(file);
+        List<SupportPoint> points = new ArrayList<>(rows.size());
+        for (SupportPointWorkbook.ParsedPoint row : rows) {
+            SupportPoint point = new SupportPoint();
+            // The workbook already required both coordinates: no lookup per row.
+            apply(point, row.getRequest(), false);
+            points.add(point);
+        }
+        supportPointRepository.saveAll(points);
+        log.info("Imported {} support points", points.size());
+        return SupportPointImportResponse.builder().importedCount(points.size()).build();
+    }
+
+    private SupportPoint find(Long id) {
+        return supportPointRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException(ErrorCode.SUPPORT_POINT_NOT_FOUND));
+    }
+
+    /** Text fields through the mapper, trimmed; then the coordinates, looked up when both are missing. */
+    private void apply(SupportPoint point, SupportPointRequest request, boolean mayGeocode) {
+        supportPointMapper.updateEntity(request, point);
+        point.setName(point.getName().trim());
+        point.setProvince(point.getProvince().trim());
+        point.setDistrict(point.getDistrict().trim());
+        point.setAddress(StringUtils.hasText(point.getAddress()) ? point.getAddress().trim() : null);
+        point.setPhoneNumber(point.getPhoneNumber().trim());
+
+        Double latitude = request.getLatitude();
+        Double longitude = request.getLongitude();
+        if (latitude == null && longitude == null && mayGeocode) {
+            GeocodedPlace place = geocodingService.geocode(placeQuery(point))
+                    .orElseThrow(() -> new BusinessException(ErrorCode.ADDRESS_NOT_FOUND,
+                            "No place matches this address; enter the coordinates instead"));
+            latitude = place.getLatitude();
+            longitude = place.getLongitude();
+        }
+        if (latitude == null || longitude == null) {
+            throw new BusinessException(ErrorCode.SUPPORT_POINT_LOCATION_REQUIRED,
+                    "Give both latitude and longitude, or neither to look them up from the address");
+        }
+        point.setLatitude(BigDecimal.valueOf(latitude).setScale(COORDINATE_SCALE, RoundingMode.HALF_UP));
+        point.setLongitude(BigDecimal.valueOf(longitude).setScale(COORDINATE_SCALE, RoundingMode.HALF_UP));
+    }
+
+    /** "street, district, province" — the street part only when known. */
+    private static String placeQuery(SupportPoint point) {
+        String area = point.getDistrict() + ", " + point.getProvince();
+        return point.getAddress() == null ? area : point.getAddress() + ", " + area;
     }
 
     private NearbySupportPointsResponse.Origin origin(String address, Double latitude, Double longitude) {

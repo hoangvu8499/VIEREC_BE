@@ -13,6 +13,7 @@ import com.vierec.modules.exam.dto.ExamAttemptResponse;
 import com.vierec.modules.exam.dto.MyExamResponse;
 import com.vierec.modules.exam.entity.Exam;
 import com.vierec.modules.exam.entity.ExamAttempt;
+import com.vierec.modules.exam.entity.ExamAttemptQuestion;
 import com.vierec.modules.exam.entity.ExamOption;
 import com.vierec.modules.exam.entity.ExamQuestion;
 import com.vierec.modules.exam.mapper.ExamMapper;
@@ -27,13 +28,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -45,6 +49,7 @@ public class ExamAttemptServiceImpl implements ExamAttemptService {
     /** Answers sent this long after the deadline still count: the auto-submit at 00:00 needs time to arrive. */
     static final Duration SUBMIT_GRACE = Duration.ofMinutes(1);
     private static final BigDecimal MAX_SCORE = BigDecimal.TEN;
+    private static final Random RANDOM = new SecureRandom();
 
     private final UserRepository userRepository;
     private final CourseRepository courseRepository;
@@ -74,6 +79,9 @@ public class ExamAttemptServiceImpl implements ExamAttemptService {
         if (taker.exam.getQuestions().isEmpty()) {
             throw new BusinessException(ErrorCode.EXAM_HAS_NO_QUESTIONS);
         }
+        if (taker.exam.getQuestions().size() < taker.exam.paperSize()) {
+            throw new BusinessException(ErrorCode.EXAM_NOT_ENOUGH_QUESTIONS);
+        }
         // A completed course (passed, or confirmed by an admin) needs no more watching.
         if (taker.enrollment.getStatus() != EnrollmentStatus.COMPLETED
                 && !progressService.summarize(taker.user.getId(), courseId).isExamReady()) {
@@ -85,9 +93,10 @@ public class ExamAttemptServiceImpl implements ExamAttemptService {
         attempt.setStartedAt(now);
         attempt.setDeadlineAt(now.plusMinutes(taker.exam.getDurationMinutes()));
         attempt.setPassScore(taker.exam.getPassScore());
+        draw(taker.exam, attempt);
         attempt = attemptRepository.saveAndFlush(attempt);
-        log.info("User id={} started exam id={} (attempt id={})", taker.user.getId(), taker.exam.getId(),
-                attempt.getId());
+        log.info("User id={} started exam id={} (attempt id={}, {} of {} questions)", taker.user.getId(),
+                taker.exam.getId(), attempt.getId(), attempt.getQuestions().size(), taker.exam.getQuestions().size());
         return response(taker.exam, attempt, now);
     }
 
@@ -137,16 +146,38 @@ public class ExamAttemptServiceImpl implements ExamAttemptService {
         return attempt;
     }
 
+    /** The paper of a new attempt: {@code paperSize} questions of the bank, picked and ordered at random. */
+    private static void draw(Exam exam, ExamAttempt attempt) {
+        List<ExamQuestion> bank = new ArrayList<>(exam.getQuestions());
+        Collections.shuffle(bank, RANDOM);
+        List<ExamQuestion> paper = bank.subList(0, exam.paperSize());
+        for (int i = 0; i < paper.size(); i++) {
+            ExamAttemptQuestion drawn = new ExamAttemptQuestion();
+            drawn.setAttempt(attempt);
+            drawn.setQuestion(paper.get(i));
+            drawn.setSortOrder(i + 1);
+            attempt.getQuestions().add(drawn);
+        }
+    }
+
+    /** Questions of the learner's paper still in the bank (a question deleted since is dropped), in paper order. */
+    private static List<ExamQuestion> paper(ExamAttempt attempt) {
+        return attempt.getQuestions().stream()
+                .map(ExamAttemptQuestion::getQuestion)
+                .collect(Collectors.toList());
+    }
+
     private static boolean isLate(ExamAttempt attempt, LocalDateTime now) {
         return now.isAfter(attempt.getDeadlineAt().plus(SUBMIT_GRACE));
     }
 
     /**
-     * Score = correct / questions x 10, against the questions as they are now. Passing compares the exact fraction
-     * (correct x 10 >= pass score x questions), not the rounded score, like the admin page's "at least N correct".
+     * Score = correct / questions of the paper x 10, against these questions as they are now. Passing compares the
+     * exact fraction (correct x 10 >= pass score x questions), not the rounded score, like the admin page's "at least
+     * N correct".
      */
     private void grade(Taker taker, ExamAttempt attempt, Map<Long, ExamOption> selected, LocalDateTime now) {
-        List<ExamQuestion> questions = taker.exam.getQuestions();
+        List<ExamQuestion> questions = paper(attempt);
         int correct = (int) questions.stream()
                 .filter(question -> question.getCorrectOption() == selected.get(question.getId()))
                 .count();
@@ -181,7 +212,7 @@ public class ExamAttemptServiceImpl implements ExamAttemptService {
         if (!attempt.isSubmitted()) {
             attemptResponse.setRemainingSeconds(Math.max(0, Duration.between(now, attempt.getDeadlineAt())
                     .getSeconds()));
-            attemptResponse.setQuestions(exam.getQuestions().stream()
+            attemptResponse.setQuestions(paper(attempt).stream()
                     .map(examMapper::toPaperQuestion)
                     .collect(Collectors.toList()));
         }

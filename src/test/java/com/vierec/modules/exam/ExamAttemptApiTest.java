@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.servlet.http.Cookie;
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -35,6 +36,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
+import static org.hamcrest.Matchers.matchesPattern;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -78,7 +81,7 @@ class ExamAttemptApiTest {
 
     @AfterEach
     void cleanUp() {
-        for (String table : new String[] {"exam_attempts", "exam_questions", "exams", "course_enrollments", "courses",
+        for (String table : new String[] {"exam_attempt_questions", "exam_attempts", "exam_questions", "exams", "course_enrollments", "courses",
                 "user_roles", "users"}) {
             jdbcTemplate.update("DELETE FROM " + table);
         }
@@ -94,7 +97,7 @@ class ExamAttemptApiTest {
                 .andExpect(jsonPath("$.data.durationMinutes").value(30))
                 .andExpect(jsonPath("$.data.questionCount").value(3))
                 .andExpect(jsonPath("$.data.attempt").value((Object) null))
-                .andReturn().getResponse().getContentAsString();
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         assertThat(before).doesNotContain("correctOption");
 
         String started = perform(post(myExam() + "/start"), learner)
@@ -103,9 +106,9 @@ class ExamAttemptApiTest {
                 .andExpect(jsonPath("$.data.attempt.remainingSeconds",
                         allOf(greaterThan(1790), lessThanOrEqualTo(1800))))
                 .andExpect(jsonPath("$.data.attempt.questions.length()").value(3))
-                .andExpect(jsonPath("$.data.attempt.questions[0].content").value("Câu 1"))
-                .andExpect(jsonPath("$.data.attempt.questions[0].optionB").value("Câu 1 - B"))
-                .andReturn().getResponse().getContentAsString();
+                .andExpect(jsonPath("$.data.attempt.questions[0].content", matchesPattern("Câu [123]")))
+                .andExpect(jsonPath("$.data.attempt.questions[0].optionB", matchesPattern("Câu [123] - B")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         assertThat(started).doesNotContain("correctOption");
         JsonNode attempt = objectMapper.readTree(started).path("data").path("attempt");
         long[] ids = questionIds(attempt);
@@ -213,7 +216,7 @@ class ExamAttemptApiTest {
         createExam("5", "A", "B", "C");
         start();
         perform(put(exam()).contentType(MediaType.APPLICATION_JSON)
-                .content(json(settings(60, "9"))), admin)
+                .content(json(settings(60, "9", 3))), admin)
                 .andExpect(status().isOk());
 
         perform(get(myExam()), learner)
@@ -281,6 +284,79 @@ class ExamAttemptApiTest {
                 .andExpect(jsonPath("$.errors[0].field").value("answers"));
     }
 
+    @Test
+    void eachLearnerGetsTheConfiguredNumberOfQuestionsDrawnAtRandomAndIsGradedOnThem() throws Exception {
+        // A bank of 10 questions, 5 per paper; "Câu 1".."Câu 10" all answered A.
+        createExam(5, "5", "A", "A", "A", "A", "A", "A", "A", "A", "A", "A");
+        perform(get(myExam()), learner).andExpect(jsonPath("$.data.questionCount").value(5));
+
+        JsonNode attempt = start();
+        List<String> paper = contents(attempt);
+        assertThat(paper).hasSize(5).doesNotHaveDuplicates()
+                .allMatch(content -> content.matches("Câu ([1-9]|10)"));
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM exam_attempt_questions", Integer.class))
+                .isEqualTo(5);
+        // Reloading shows the same paper in the same order.
+        assertThat(contents(start())).isEqualTo(paper);
+
+        // Another learner gets another draw (the same questions in the same order: 1 chance in 30,240).
+        User other = user("hocvien2", RoleCode.TRAINEE);
+        enroll(other.getId(), courseId, "ENROLLED");
+        String body = perform(post(myExam() + "/start"), login(other)).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertThat(contents(objectMapper.readTree(body).path("data").path("attempt"))).isNotEqualTo(paper);
+
+        // Graded on the 5 questions of the paper (3 answered right); a bank question not on the paper is ignored.
+        List<Object> pairs = new ArrayList<>();
+        for (JsonNode question : attempt.path("questions")) {
+            pairs.add(question.path("id").asLong());
+            pairs.add(pairs.size() < 6 ? "A" : "B");
+        }
+        long notOnPaper = jdbcTemplate.queryForObject("SELECT MIN(id) FROM exam_questions WHERE id NOT IN "
+                + "(SELECT question_id FROM exam_attempt_questions WHERE attempt_id = ?)", Long.class,
+                attempt.path("id").asLong());
+        pairs.add(notOnPaper);
+        pairs.add("A");
+        submit(answers(pairs.toArray()))
+                .andExpect(jsonPath("$.data.attempt.questionCount").value(5))
+                .andExpect(jsonPath("$.data.attempt.correctCount").value(3))
+                .andExpect(jsonPath("$.data.attempt.score").value(6))
+                .andExpect(jsonPath("$.data.attempt.passed").value(true));
+    }
+
+    @Test
+    void cannotStartWhileTheBankHasFewerQuestionsThanAPaper() throws Exception {
+        createExam(5, "5", "A", "B", "C");
+
+        perform(get(myExam()), learner).andExpect(jsonPath("$.data.questionCount").value(5));
+        perform(post(myExam() + "/start"), learner)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("VRC-409-704"));
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM exam_attempts", Integer.class)).isZero();
+    }
+
+    @Test
+    void anExamWithoutAPaperSizeUsesTheWholeBank() throws Exception {
+        createExam("5", "A", "B", "C");
+        jdbcTemplate.update("UPDATE exams SET questions_per_attempt = NULL");
+
+        perform(get(myExam()), learner).andExpect(jsonPath("$.data.questionCount").value(3));
+        assertThat(contents(start())).containsExactlyInAnyOrder("Câu 1", "Câu 2", "Câu 3");
+    }
+
+    @Test
+    void aQuestionDeletedDuringTheAttemptLeavesThePaper() throws Exception {
+        createExam("5", "A", "B", "C");
+        long[] ids = questionIds(start());
+        perform(delete(exam() + "/questions/" + ids[2]), admin).andExpect(status().is2xxSuccessful());
+
+        assertThat(contents(start())).containsExactlyInAnyOrder("Câu 1", "Câu 2");
+        submit(answers(ids[0], "A", ids[1], "B"))
+                .andExpect(jsonPath("$.data.attempt.questionCount").value(2))
+                .andExpect(jsonPath("$.data.attempt.correctCount").value(2))
+                .andExpect(jsonPath("$.data.attempt.score").value(10));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private String exam() {
@@ -291,9 +367,14 @@ class ExamAttemptApiTest {
         return "/api/v1/courses/" + courseId + "/my-exam";
     }
 
-    /** Exam of 30 minutes with one question per correct option ("Câu 1", "Câu 2"...). */
+    /** Exam of 30 minutes with one question per correct option ("Câu 1", "Câu 2"...), all on the paper. */
     private void createExam(String passScore, String... correctOptions) throws Exception {
-        perform(put(exam()).contentType(MediaType.APPLICATION_JSON).content(json(settings(30, passScore))), admin)
+        createExam(Math.max(1, correctOptions.length), passScore, correctOptions);
+    }
+
+    private void createExam(int questionsPerAttempt, String passScore, String... correctOptions) throws Exception {
+        perform(put(exam()).contentType(MediaType.APPLICATION_JSON)
+                .content(json(settings(30, passScore, questionsPerAttempt))), admin)
                 .andExpect(status().isOk());
         for (int i = 0; i < correctOptions.length; i++) {
             Map<String, Object> question = new HashMap<>();
@@ -311,7 +392,7 @@ class ExamAttemptApiTest {
     private JsonNode start() throws Exception {
         String body = perform(post(myExam() + "/start"), learner)
                 .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(body).path("data").path("attempt");
     }
 
@@ -320,13 +401,22 @@ class ExamAttemptApiTest {
                 learner);
     }
 
+    /** Ids of the paper's questions by question number: {@code ids[0]} is "Câu 1", whatever its position. */
     private static long[] questionIds(JsonNode attempt) {
         JsonNode questions = attempt.path("questions");
         long[] ids = new long[questions.size()];
-        for (int i = 0; i < ids.length; i++) {
-            ids[i] = questions.path(i).path("id").asLong();
+        for (JsonNode question : questions) {
+            int number = Integer.parseInt(question.path("content").asText().substring("Câu ".length()));
+            ids[number - 1] = question.path("id").asLong();
         }
         return ids;
+    }
+
+    /** Question contents of the paper, in the order shown. */
+    private static List<String> contents(JsonNode attempt) {
+        List<String> contents = new ArrayList<>();
+        attempt.path("questions").forEach(question -> contents.add(question.path("content").asText()));
+        return contents;
     }
 
     /** Pairs of (question id, option). */
@@ -343,11 +433,12 @@ class ExamAttemptApiTest {
         return body;
     }
 
-    private static Map<String, Object> settings(int duration, String passScore) {
+    private static Map<String, Object> settings(int duration, String passScore, int questionsPerAttempt) {
         Map<String, Object> body = new HashMap<>();
         body.put("title", "Bài thi chứng chỉ");
         body.put("durationMinutes", duration);
         body.put("passScore", passScore);
+        body.put("questionsPerAttempt", questionsPerAttempt);
         return body;
     }
 

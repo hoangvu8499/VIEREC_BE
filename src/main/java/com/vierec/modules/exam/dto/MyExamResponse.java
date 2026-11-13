@@ -33,7 +33,7 @@ public class MyExamResponse implements Serializable {
     @Schema(description = "Out of 10", example = "5")
     private BigDecimal passScore;
 
-    @Schema(example = "20")
+    @Schema(description = "Questions on the learner's paper", example = "30")
     private Integer questionCount;
 
     @JsonInclude(JsonInclude.Include.ALWAYS)

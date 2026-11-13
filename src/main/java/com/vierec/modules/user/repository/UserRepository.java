@@ -53,6 +53,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query(value = "SELECT COUNT(*) FROM users WHERE cccd = :cccd", nativeQuery = true)
     long countByCccdIncludingDeleted(@Param("cccd") String cccd);
 
+    // Batch form of the four checks above, for an import that would otherwise run one query per row.
+    // Each returns the values of :values that a row already holds, soft-deleted rows included.
+
+    @Query(value = "SELECT username FROM users WHERE username IN (:values)", nativeQuery = true)
+    List<String> findTakenUsernames(@Param("values") Collection<String> values);
+
+    @Query(value = "SELECT email FROM users WHERE email IN (:values)", nativeQuery = true)
+    List<String> findTakenEmails(@Param("values") Collection<String> values);
+
+    @Query(value = "SELECT phone_number FROM users WHERE phone_number IN (:values)", nativeQuery = true)
+    List<String> findTakenPhoneNumbers(@Param("values") Collection<String> values);
+
+    @Query(value = "SELECT cccd FROM users WHERE cccd IN (:values)", nativeQuery = true)
+    List<String> findTakenCccds(@Param("values") Collection<String> values);
+
     @Query("SELECT u FROM User u WHERE "
             + "(:keyword IS NULL OR LOWER(u.username) LIKE LOWER(CONCAT('%', :keyword, '%')) "
             + "OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')) "

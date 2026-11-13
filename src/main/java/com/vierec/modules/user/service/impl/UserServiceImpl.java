@@ -31,9 +31,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -80,6 +83,16 @@ public class UserServiceImpl implements UserService {
 
     /** Shared by self-registration and admin creation: uniqueness checks, then the insert. */
     private User createUser(RegisterRequest request, List<Role> roles, UserStatus status, Long assignedBy) {
+        return createUser(request, roles, status, assignedBy, null);
+    }
+
+    /**
+     * Shared by self-registration and admin creation: uniqueness checks, then the insert.
+     *
+     * @param passwordHash already hashed password to store as is, or {@code null} to hash the request's own
+     */
+    private User createUser(RegisterRequest request, List<Role> roles, UserStatus status, Long assignedBy,
+                            String passwordHash) {
         String email = normalizeEmail(request.getEmail());
 
         // Checked against soft-deleted rows too: they still hold the unique keys in the table.
@@ -103,7 +116,7 @@ public class UserServiceImpl implements UserService {
         user.setLastName(request.getLastName().trim());
         user.setAddress(request.getAddress() == null ? null : request.getAddress().trim());
         user.setEmail(email);
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setPasswordHash(passwordHash == null ? passwordEncoder.encode(request.getPassword()) : passwordHash);
         user.setStatus(status);
         for (Role role : roles) {
             user.addRole(role, assignedBy);
@@ -122,6 +135,34 @@ public class UserServiceImpl implements UserService {
         log.info("User id={} created {} account id={} in business id={}", actor.getId(), roleCode, saved.getId(),
                 business.getId());
         return saved;
+    }
+
+    @Override
+    @Transactional
+    public List<User> createBusinessAccounts(List<RegisterRequest> requests, String roleCode, Business business,
+                                             String actorUsername, boolean mustChangePassword) {
+        User actor = findActor(actorUsername);
+        List<Role> roles = findRoles(Collections.singleton(roleCode));
+        // A batch shares one password, so one BCrypt round serves every row instead of one per row.
+        Map<String, String> hashes = new HashMap<String, String>();
+        List<User> created = new ArrayList<User>(requests.size());
+
+        for (RegisterRequest request : requests) {
+            String hash = hashes.get(request.getPassword());
+            if (hash == null) {
+                hash = passwordEncoder.encode(request.getPassword());
+                hashes.put(request.getPassword(), hash);
+            }
+            User user = createUser(request, roles, UserStatus.ACTIVE, actor.getId(), hash);
+            user.setBusiness(business);
+            user.setMustChangePassword(mustChangePassword);
+            created.add(user);
+        }
+        // One flush for the batch: a unique value slipping in behind the caller's checks still rolls everything back.
+        userRepository.flush();
+        log.info("User id={} created {} {} accounts in business id={}", actor.getId(), created.size(), roleCode,
+                business.getId());
+        return created;
     }
 
     @Override

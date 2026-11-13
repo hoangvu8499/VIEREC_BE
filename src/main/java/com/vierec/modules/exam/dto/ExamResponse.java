@@ -1,5 +1,6 @@
 package com.vierec.modules.exam.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -37,8 +38,13 @@ public class ExamResponse implements Serializable {
     @Schema(description = "Minimum score to pass, out of 10", example = "5")
     private BigDecimal passScore;
 
-    @Schema(example = "20")
+    @Schema(description = "Questions in the bank", example = "120")
     private Integer questionCount;
+
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    @Schema(description = "Questions drawn for each learner; null = every question (exam set up before random "
+            + "papers existed)", example = "30")
+    private Integer questionsPerAttempt;
 
     @Schema(description = "In exam order")
     private List<ExamQuestionResponse> questions;

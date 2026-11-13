@@ -82,6 +82,14 @@ public enum ErrorCode {
     ADDRESS_NOT_FOUND("VRC-404-601", "No place matches this address", HttpStatus.NOT_FOUND),
     GEOCODING_UNAVAILABLE("VRC-503-601", "The address lookup service is unavailable, try again later",
             HttpStatus.SERVICE_UNAVAILABLE),
+    SUPPORT_POINT_NOT_FOUND("VRC-404-602", "Support point not found", HttpStatus.NOT_FOUND),
+    SUPPORT_POINT_IMPORT_INVALID_ROWS("VRC-400-602", "Some rows of the file are invalid; nothing was imported",
+            HttpStatus.BAD_REQUEST),
+    SUPPORT_POINT_IMPORT_UNREADABLE("VRC-400-603", "The file is not a readable Excel workbook",
+            HttpStatus.BAD_REQUEST),
+    SUPPORT_POINT_IMPORT_EMPTY("VRC-400-604", "The file has no support points", HttpStatus.BAD_REQUEST),
+    SUPPORT_POINT_IMPORT_TOO_MANY_ROWS("VRC-400-605", "The file has too many support points",
+            HttpStatus.BAD_REQUEST),
 
     // ---------- Exam ----------
     EXAM_NOT_FOUND("VRC-404-701", "This course has no exam yet", HttpStatus.NOT_FOUND),
@@ -96,6 +104,8 @@ public enum ErrorCode {
     EXAM_HAS_NO_QUESTIONS("VRC-409-701", "This exam has no questions yet", HttpStatus.CONFLICT),
     EXAM_ALREADY_TAKEN("VRC-409-702", "This exam can be taken only once and was already submitted",
             HttpStatus.CONFLICT),
+    EXAM_NOT_ENOUGH_QUESTIONS("VRC-409-704", "This exam has fewer questions than each paper needs",
+            HttpStatus.CONFLICT),
     EXAM_PROGRESS_NOT_ENOUGH("VRC-409-703", "Watch at least 80% of the course videos before taking the exam",
             HttpStatus.CONFLICT),
 
@@ -106,7 +116,12 @@ public enum ErrorCode {
     NOT_A_BUSINESS_MANAGER("VRC-403-801", "This account does not manage a business", HttpStatus.FORBIDDEN),
     BUSINESS_INACTIVE("VRC-403-802", "The business is inactive", HttpStatus.FORBIDDEN),
     BUSINESS_ENROLL_NOT_MEMBERS("VRC-400-801", "Some learners do not belong to the business",
-            HttpStatus.BAD_REQUEST);
+            HttpStatus.BAD_REQUEST),
+    MEMBER_IMPORT_INVALID_ROWS("VRC-400-802", "Some rows of the file are invalid; no account was created",
+            HttpStatus.BAD_REQUEST),
+    MEMBER_IMPORT_UNREADABLE("VRC-400-803", "The file is not a readable Excel workbook", HttpStatus.BAD_REQUEST),
+    MEMBER_IMPORT_EMPTY("VRC-400-804", "The file has no learners", HttpStatus.BAD_REQUEST),
+    MEMBER_IMPORT_TOO_MANY_ROWS("VRC-400-805", "The file has too many learners", HttpStatus.BAD_REQUEST);
 
     private final String code;
     private final String defaultMessage;

@@ -22,6 +22,8 @@ import java.math.BigDecimal;
 @Schema(name = "ExamRequest")
 public class ExamRequest {
 
+    public static final int QUESTIONS_PER_ATTEMPT_MAX = 500;
+
     @NotBlank(message = "{exam.title.required}")
     @Size(max = 200, message = "{exam.title.size}")
     @Schema(example = "Bài thi chứng chỉ An toàn hoá chất")
@@ -39,4 +41,11 @@ public class ExamRequest {
     @Digits(integer = 2, fraction = 2, message = "{exam.passScore.digits}")
     @Schema(description = "Minimum score to pass, out of 10", example = "5")
     private BigDecimal passScore;
+
+    @NotNull(message = "{exam.questionsPerAttempt.required}")
+    @Min(value = 1, message = "{exam.questionsPerAttempt.range}")
+    @Max(value = QUESTIONS_PER_ATTEMPT_MAX, message = "{exam.questionsPerAttempt.range}")
+    @Schema(description = "Questions on each learner's paper, drawn at random from the exam's questions. May exceed "
+            + "the current number of questions: learners cannot start until enough are added", example = "30")
+    private Integer questionsPerAttempt;
 }

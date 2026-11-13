@@ -244,6 +244,7 @@ CREATE TABLE exams (
     title            VARCHAR(200)     NOT NULL COMMENT 'Tên bài thi',
     duration_minutes INT UNSIGNED     NOT NULL DEFAULT 30 COMMENT 'Thời gian làm bài (phút)',
     pass_score       DECIMAL(4,2)     NOT NULL DEFAULT 5.00 COMMENT 'Điểm đạt, thang 10',
+    questions_per_attempt INT UNSIGNED NULL COMMENT 'Số câu mỗi đề, bốc ngẫu nhiên từ kho; NULL = toàn bộ kho',
     created_at       DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -288,6 +289,21 @@ CREATE TABLE exam_attempts (
     KEY idx_exam_attempts_user (user_id),
     CONSTRAINT fk_exam_attempts_exam FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
     CONSTRAINT fk_exam_attempts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Câu hỏi đã bốc ngẫu nhiên cho từng lượt thi, theo thứ tự hiện cho học viên; chấm điểm theo đúng các câu này.
+CREATE TABLE exam_attempt_questions (
+    id          BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    attempt_id  BIGINT UNSIGNED  NOT NULL,
+    question_id BIGINT UNSIGNED  NOT NULL,
+    sort_order  INT UNSIGNED     NOT NULL COMMENT 'Thứ tự câu trong đề của học viên',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_exam_attempt_questions (attempt_id, question_id),
+    KEY idx_exam_attempt_questions_question (question_id),
+    CONSTRAINT fk_exam_attempt_questions_attempt FOREIGN KEY (attempt_id) REFERENCES exam_attempts(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_exam_attempt_questions_question FOREIGN KEY (question_id) REFERENCES exam_questions(id)
+        ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Khách hàng doanh nghiệp (role BUSINESS, users.business_id) và tiến độ xem video lưu trên server.

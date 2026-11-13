@@ -71,7 +71,7 @@ class BusinessApiTest {
 
     @AfterEach
     void cleanUp() {
-        for (String table : new String[] {"lesson_progress", "exam_attempts", "exam_questions", "exams",
+        for (String table : new String[] {"lesson_progress", "exam_attempt_questions", "exam_attempts", "exam_questions", "exams",
                 "course_enrollments", "lessons", "courses", "user_roles", "users", "businesses"}) {
             jdbcTemplate.update("DELETE FROM " + table);
         }

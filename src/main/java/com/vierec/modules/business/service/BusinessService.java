@@ -7,6 +7,8 @@ import com.vierec.modules.business.dto.BusinessEnrollRequest;
 import com.vierec.modules.business.dto.BusinessEnrollResponse;
 import com.vierec.modules.business.dto.BusinessManagerRequest;
 import com.vierec.modules.business.dto.BusinessMemberDetailResponse;
+import com.vierec.modules.business.dto.BusinessMemberImportRequest;
+import com.vierec.modules.business.dto.BusinessMemberImportResponse;
 import com.vierec.modules.business.dto.BusinessMemberResponse;
 import com.vierec.modules.business.dto.BusinessRequest;
 import com.vierec.modules.business.dto.BusinessResponse;
@@ -59,6 +61,13 @@ public interface BusinessService {
 
     /** Creates a learner account (role TRAINEE) in the manager's business. */
     BusinessMemberResponse createMember(String username, RegisterRequest request);
+
+    /**
+     * Creates one learner account (role TRAINEE) per row of an Excel file, all with the default password the
+     * business chose. All or nothing: a single unusable row creates no account at all and answers 400
+     * {@code MEMBER_IMPORT_INVALID_ROWS} listing each problem as {@code rows[<Excel row>].<field>}.
+     */
+    BusinessMemberImportResponse importMembers(String username, BusinessMemberImportRequest request);
 
     BusinessMemberDetailResponse myMember(String username, Long userId);
 

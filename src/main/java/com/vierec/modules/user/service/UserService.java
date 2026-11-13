@@ -13,6 +13,8 @@ import com.vierec.modules.user.entity.User;
 import com.vierec.modules.user.entity.UserStatus;
 import org.springframework.data.domain.Pageable;
 
+import java.util.List;
+
 public interface UserService {
 
     /** Self-registration: creates an ACTIVE account with the TRAINEE role. */
@@ -26,6 +28,16 @@ public interface UserService {
      * manager. Same uniqueness checks as {@link #create}; a manager has no CCCD, date of birth or address.
      */
     User createBusinessAccount(RegisterRequest request, String roleCode, Business business, String actorUsername);
+
+    /**
+     * Batch form of {@link #createBusinessAccount}, in request order and in one transaction: either every account
+     * is created or none is. Identical passwords are hashed once, because BCrypt at cost 12 takes about a quarter
+     * of a second and a batch may hold hundreds of rows.
+     *
+     * @param mustChangePassword marks the accounts as still carrying the password the caller chose for them
+     */
+    List<User> createBusinessAccounts(List<RegisterRequest> requests, String roleCode, Business business,
+                                      String actorUsername, boolean mustChangePassword);
 
     UserResponse getById(Long id);
 

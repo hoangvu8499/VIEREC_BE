@@ -54,6 +54,7 @@ public class ExamServiceImpl implements ExamService {
         exam.setTitle(request.getTitle().trim());
         exam.setDurationMinutes(request.getDurationMinutes());
         exam.setPassScore(request.getPassScore());
+        exam.setQuestionsPerAttempt(request.getQuestionsPerAttempt());
 
         Exam saved = examRepository.saveAndFlush(exam);
         log.info("{} exam id={} of course id={}", created ? "Created" : "Updated", saved.getId(), courseId);

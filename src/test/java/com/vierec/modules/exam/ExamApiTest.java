@@ -83,7 +83,7 @@ class ExamApiTest {
 
     @AfterEach
     void cleanUp() {
-        for (String table : new String[] {"exam_questions", "exams", "courses", "user_roles", "users"}) {
+        for (String table : new String[] {"exam_attempt_questions", "exam_questions", "exams", "courses", "user_roles", "users"}) {
             jdbcTemplate.update("DELETE FROM " + table);
         }
     }
@@ -103,25 +103,33 @@ class ExamApiTest {
                 .andExpect(jsonPath("$.data.title").value("Bài thi chứng chỉ"))
                 .andExpect(jsonPath("$.data.durationMinutes").value(30))
                 .andExpect(jsonPath("$.data.passScore").value(5))
+                .andExpect(jsonPath("$.data.questionsPerAttempt").value(20))
                 .andExpect(jsonPath("$.data.questionCount").value(0));
 
         perform(put(exam(courseId)).contentType(MediaType.APPLICATION_JSON)
-                .content(json(settings("Bài thi cuối khoá", 45, "7.5"))), admin)
+                .content(json(settings("Bài thi cuối khoá", 45, "7.5", 40))), admin)
                 .andExpect(status().isOk());
         perform(get(exam(courseId)), admin)
                 .andExpect(jsonPath("$.data.title").value("Bài thi cuối khoá"))
                 .andExpect(jsonPath("$.data.durationMinutes").value(45))
-                .andExpect(jsonPath("$.data.passScore").value(7.5));
+                .andExpect(jsonPath("$.data.passScore").value(7.5))
+                .andExpect(jsonPath("$.data.questionsPerAttempt").value(40));
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM exams", Integer.class)).isEqualTo(1);
     }
 
     @Test
     void validatesTheSettings() throws Exception {
         perform(put(exam(courseId)).contentType(MediaType.APPLICATION_JSON)
-                .content(json(settings(" ", 0, "10.5"))), admin)
+                .content(json(settings(" ", 0, "10.5", null))), admin)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[*].field", containsInAnyOrder("title", "durationMinutes",
-                        "passScore")));
+                        "passScore", "questionsPerAttempt")));
+        for (int outOfRange : new int[] {0, 501}) {
+            perform(put(exam(courseId)).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(settings("Bài thi", 30, "5", outOfRange))), admin)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors[0].field").value("questionsPerAttempt"));
+        }
         perform(put(exam(courseId)).contentType(MediaType.APPLICATION_JSON)
                 .content(json(settings("Bài thi", 30, "0"))), admin)
                 .andExpect(status().isBadRequest())
@@ -352,10 +360,16 @@ class ExamApiTest {
     }
 
     private static Map<String, Object> settings(String title, int duration, String passScore) {
+        return settings(title, duration, passScore, 20);
+    }
+
+    private static Map<String, Object> settings(String title, int duration, String passScore,
+                                                Integer questionsPerAttempt) {
         Map<String, Object> body = new HashMap<>();
         body.put("title", title);
         body.put("durationMinutes", duration);
         body.put("passScore", passScore);
+        body.put("questionsPerAttempt", questionsPerAttempt);
         return body;
     }
 

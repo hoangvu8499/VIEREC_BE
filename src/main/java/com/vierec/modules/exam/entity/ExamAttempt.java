@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import javax.persistence.CascadeType;
 import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.FetchType;
@@ -15,10 +16,14 @@ import javax.persistence.Id;
 import javax.persistence.Index;
 import javax.persistence.JoinColumn;
 import javax.persistence.ManyToOne;
+import javax.persistence.OneToMany;
+import javax.persistence.OrderBy;
 import javax.persistence.Table;
 import javax.persistence.UniqueConstraint;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A learner taking the exam of a course ({@code exam_attempts}): one row per (exam, user), as an exam can be taken
@@ -75,6 +80,11 @@ public class ExamAttempt extends BaseEntity {
 
     @Column(name = "passed")
     private Boolean passed;
+
+    /** The learner's paper: the questions drawn at start, in the order shown. Saved with the attempt. */
+    @OneToMany(mappedBy = "attempt", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC")
+    private List<ExamAttemptQuestion> questions = new ArrayList<>();
 
     public boolean isSubmitted() {
         return submittedAt != null;

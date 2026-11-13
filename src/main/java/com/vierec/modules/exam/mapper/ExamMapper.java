@@ -25,7 +25,7 @@ public interface ExamMapper {
 
     /** Without the attempt: the service adds it. */
     @Mapping(target = "courseId", source = "course.id")
-    @Mapping(target = "questionCount", expression = "java(exam.getQuestions().size())")
+    @Mapping(target = "questionCount", expression = "java(exam.paperSize())")
     @Mapping(target = "attempt", ignore = true)
     MyExamResponse toMyExam(Exam exam);
 
